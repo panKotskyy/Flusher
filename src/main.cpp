@@ -3,6 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include "ElegantOTA.h"
 #include <ESP32Servo.h>
+#include "WiFiManager.h"
 
 // Define PINS
 #define servoPin 13
@@ -92,12 +93,6 @@ const char index_html[] PROGMEM = R"rawliteral(
 
 )rawliteral";
 
-// unsigned long previousMillis = 0;
-unsigned long lastTimeWiFiReconects = 0;
-const long interval = 10000;  // interval to wait for Wi-Fi connection (milliseconds)
-const long wifiReconectInterval = 30000;  // interval between Wi-Fi reconecting tries (milliseconds)
-
-void initWiFi();
 
 void initWebServer();
 void initServo();
@@ -111,13 +106,13 @@ void detectSound();
 void readDistance();
 void flush();
 
-
+WiFiManager wifiManager(ssid, password);
 
 void setup() {
   Serial.begin(115200);
   ++bootCount;
 
-  initWiFi();
+  wifiManager.connect();
   initWebServer();
   initServo();
   initSoundDetector();
@@ -144,46 +139,6 @@ void loop() {
   }
   
   delay(500);
-}
-
-void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info){
-  Serial.println("Connected to AP successfully!");
-}
-
-void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info){
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info){
-  Serial.println("Disconnected from WiFi access point");
-  Serial.print("WiFi lost connection. Reason: ");
-  Serial.println(info.wifi_sta_disconnected.reason);
-  Serial.println("Trying to Reconnect");
-  if ((WiFi.getMode() == WIFI_STA) && (WiFi.status() != WL_CONNECTED)) {
-    if (millis() - lastTimeWiFiReconects >= wifiReconectInterval) {
-      Serial.println("Reconnecting to WiFi...");
-      WiFi.disconnect();
-      WiFi.reconnect();
-      lastTimeWiFiReconects = millis();
-    }
-  }
-}
-
-// Initialize WiFi
-void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.onEvent(WiFiStationConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
-  WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
-  WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
-  }
-  // Serial.println(WiFi.localIP());
 }
 
 // Initialize WebServer
