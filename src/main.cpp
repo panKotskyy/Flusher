@@ -141,20 +141,12 @@ void initWebServer() {
 
   server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     if (request->url() == "/") {
-      // Extracting angle value from request body
-      String angleStr(reinterpret_cast<char *>(data), len);
-      int angleValue = angleStr.toInt();
+      String body(reinterpret_cast<char *>(data), len);
 
-      // Do something with the angle value (e.g., print it)
-      Serial.print("Received angle: ");
-      Serial.println(angleValue);
+      Serial.print("Received body: ");
+      Serial.println(body);
 
-      if (angleStr.length() > 0) {
-        pos = angleValue;
-        newRequest = true;
-      } else {
-        pos = 0;
-      }
+      newRequest = true;
 
       request->send(200, "text/html", index_html);
     }
@@ -173,19 +165,18 @@ void initSoundDetector() {
 }
 
 void initDistanceReader() {
-  pinMode(TRIG_PIN, OUTPUT); // Sets the TRIG_PIN as an Output
-  pinMode(ECHO_PIN, INPUT);  // Sets the ECHO_PIN as an Input
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
 }
 
 void initPir() {
   pinMode(PIR_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(PIR_PIN), pirInterrupt, RISING); // Setup PIR interrupt
+  attachInterrupt(digitalPinToInterrupt(PIR_PIN), pirInterrupt, RISING);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
 }
 
 void printWakeupReason() {
-  esp_sleep_wakeup_cause_t wakeupReason;
-  wakeupReason = esp_sleep_get_wakeup_cause();
+  esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
 
   switch (wakeupReason) {
     case ESP_SLEEP_WAKEUP_EXT0:
@@ -225,21 +216,15 @@ void detectSound() {
 }
 
 void readDistance() {
-  // Clears the TRIG_PIN
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
-  // Sets the TRIG_PIN on HIGH state for 10 microseconds
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-
-  // Reads the ECHO_PIN, returns the sound wave travel time in microseconds
   duration = pulseIn(ECHO_PIN, HIGH);
 
-  // Calculate the distance
   distance = duration * SOUND_SPEED / 2;
 
-  // Prints the distance in the Serial Monitor
   Serial.print("Distance (cm): ");
   Serial.println(distance);
 }
