@@ -6,19 +6,19 @@
 #include "WiFiManager.h"
 
 // Define PINS
-#define servoPin 13
-#define sound_digital 35 //yellow
-#define sound_analog 32 //green
-#define trigPin 14 //blue
-#define echoPin 27 //purple
-#define pirPin 34 //white
+#define SERVO_PIN 13
+#define SOUND_DIGITAL_PIN 35 // yellow
+#define SOUND_ANALOG_PIN 32  // green
+#define TRIG_PIN 14          // blue
+#define ECHO_PIN 27          // purple
+#define PIR_PIN 34           // white
 
 // Define sound speed in cm/uS
 #define SOUND_SPEED 0.034
 
 // Define network credentials
-const char* ssid = "ASUS_60";
-const char* password = "bohdan1010";
+const char *ssid = "ASUS_60";
+const char *password = "bohdan1010";
 
 RTC_DATA_ATTR int bootCount = 0;
 
@@ -26,10 +26,9 @@ unsigned long lastTimeMovementDetected = 0;
 
 long duration;
 float distance;
-int pos = 0;    // variable to store the servo position
-int angle = 0;
-bool newRequest = false; // Variable to detect whether a new request occurred
-int threshold = 0; // Sound threshold
+int pos = 0;                // variable to store the servo position
+bool newRequest = false;    // Variable to detect whether a new request occurred
+int threshold = 0;          // Sound threshold
 
 AsyncWebServer server(80);
 Servo myservo;
@@ -54,21 +53,13 @@ const char index_html[] PROGMEM = R"rawliteral(
             font-size: 1.5em;
             padding: 10px 20px;
         }
-        input {
-            margin-right: 10px;
-            padding: 5px;
-            font-size: 1em;
-        }
     </style>
 </head>
 <body>
-    <input type="number" id="angleInput" placeholder="Enter angle">
     <button onclick="sendPostRequest()">Flush</button>
 
     <script>
         function sendPostRequest() {
-            const angle = document.getElementById('angleInput').value;
-
             fetch('/', {
                 method: 'POST',
                 headers: {
@@ -76,7 +67,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                     // Add any other headers as needed
                 },
                 // Add body data if required
-                body: angle
+                // body: 
             })
             .then(response => {
                 // Handle the response as needed
@@ -90,16 +81,14 @@ const char index_html[] PROGMEM = R"rawliteral(
     </script>
 </body>
 </html>
-
 )rawliteral";
-
 
 void initWebServer();
 void initServo();
 void initSoundDetector();
 void initDistanceReader();
 void initPir();
-void print_wakeup_reason();
+void printWakeupReason();
 
 void pirInterrupt();
 void detectSound();
@@ -119,11 +108,11 @@ void setup() {
   initDistanceReader();
   initPir();
 
-  print_wakeup_reason();
+  printWakeupReason();
 }
 
 void loop() {
-  if (newRequest){
+  if (newRequest) {
     flush();
     newRequest = false;
   }
@@ -131,54 +120,37 @@ void loop() {
   detectSound();
   readDistance();
 
-  if (digitalRead(pirPin) == LOW && lastTimeMovementDetected + 180000 < millis()) {
-    //Go to sleep now
+  if (digitalRead(PIR_PIN) == LOW && lastTimeMovementDetected + 180000 < millis()) {
+    // Go to sleep now
     Serial.println("Going to sleep now");
     delay(1000);
     esp_deep_sleep_start();
   }
-  
+
   delay(500);
 }
 
 // Initialize WebServer
 void initWebServer() {
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/html", index_html);
   });
 
-  // server.on("/", HTTP_POST, [](AsyncWebServerRequest *request){
-  //   // Handle the request body
-  //   String requestBody = request->getParam("plain")->value();
-    
-  //   // Parse the request body to extract the "angle" parameter
-  //   if(requestBody.length() > 0){
-  //       angle = requestBody.toInt();
-  //       newRequest = true;
-  //   } else {
-  //     angle = 0;
-  //   }
-    
-  //   request->send(200, "text/html", index_html);
-  // });
-
   server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-    if (request->url() == "/" ) {
+    if (request->url() == "/") {
       // Extracting angle value from request body
-      String angle_str = "";
-      for (size_t i = 0; i < len; i++) {
-        angle_str += (char)data[i];
-      }
+      String angleStr(reinterpret_cast<char *>(data), len);
+      int angleValue = angleStr.toInt();
 
       // Do something with the angle value (e.g., print it)
       Serial.print("Received angle: ");
-      Serial.println(angle_str);
+      Serial.println(angleValue);
 
-      if (angle_str.length() > 0) {
-        angle = angle_str.toInt();
+      if (angleStr.length() > 0) {
+        pos = angleValue;
         newRequest = true;
       } else {
-        angle = 0;
+        pos = 0;
       }
 
       request->send(200, "text/html", index_html);
@@ -190,37 +162,47 @@ void initWebServer() {
 }
 
 void initServo() {
-  myservo.attach(servoPin);
+  myservo.attach(SERVO_PIN);
 }
 
 void initSoundDetector() {
-  pinMode(sound_digital, INPUT);
+  pinMode(SOUND_DIGITAL_PIN, INPUT);
 }
 
 void initDistanceReader() {
-  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
-  pinMode(echoPin, INPUT); // Sets the echoPin as an Input
+  pinMode(TRIG_PIN, OUTPUT); // Sets the TRIG_PIN as an Output
+  pinMode(ECHO_PIN, INPUT);  // Sets the ECHO_PIN as an Input
 }
 
 void initPir() {
-  pinMode(pirPin, INPUT);
-  attachInterrupt(digitalPinToInterrupt(pirPin), pirInterrupt, RISING); // Setup PIR interrupt
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)pirPin, HIGH);
+  pinMode(PIR_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PIR_PIN), pirInterrupt, RISING); // Setup PIR interrupt
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
 }
 
-void print_wakeup_reason() {
-  esp_sleep_wakeup_cause_t wakeup_reason;
+void printWakeupReason() {
+  esp_sleep_wakeup_cause_t wakeupReason;
+  wakeupReason = esp_sleep_get_wakeup_cause();
 
-  wakeup_reason = esp_sleep_get_wakeup_cause();
-
-  switch(wakeup_reason)
-  {
-    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
-    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
-    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
-    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
-    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
-    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
+  switch (wakeupReason) {
+    case ESP_SLEEP_WAKEUP_EXT0:
+      Serial.println("Wakeup caused by external signal using RTC_IO");
+      break;
+    case ESP_SLEEP_WAKEUP_EXT1:
+      Serial.println("Wakeup caused by external signal using RTC_CNTL");
+      break;
+    case ESP_SLEEP_WAKEUP_TIMER:
+      Serial.println("Wakeup caused by timer");
+      break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:
+      Serial.println("Wakeup caused by touchpad");
+      break;
+    case ESP_SLEEP_WAKEUP_ULP:
+      Serial.println("Wakeup caused by ULP program");
+      break;
+    default:
+      Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeupReason);
+      break;
   }
 }
 
@@ -229,31 +211,31 @@ void pirInterrupt() {
 }
 
 void detectSound() {
-  int val_digital = digitalRead(sound_digital);
-  int val_analog = analogRead(sound_analog);
+  int valDigital = digitalRead(SOUND_DIGITAL_PIN);
+  int valAnalog = analogRead(SOUND_ANALOG_PIN);
 
-  if (val_analog > threshold) {
-    Serial.print(val_analog);
+  if (valAnalog > threshold) {
+    Serial.print(valAnalog);
     Serial.print("\t");
-    Serial.println(val_digital);
+    Serial.println(valDigital);
   }
 }
 
 void readDistance() {
-  // Clears the trigPin
-  digitalWrite(trigPin, LOW);
+  // Clears the TRIG_PIN
+  digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
-  // Sets the trigPin on HIGH state for 10 micro seconds
-  digitalWrite(trigPin, HIGH);
+  // Sets the TRIG_PIN on HIGH state for 10 microseconds
+  digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  
-  // Reads the echoPin, returns the sound wave travel time in microseconds
-  duration = pulseIn(echoPin, HIGH);
-  
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Reads the ECHO_PIN, returns the sound wave travel time in microseconds
+  duration = pulseIn(ECHO_PIN, HIGH);
+
   // Calculate the distance
-  distance = duration * SOUND_SPEED/2;
-  
+  distance = duration * SOUND_SPEED / 2;
+
   // Prints the distance in the Serial Monitor
   Serial.print("Distance (cm): ");
   Serial.println(distance);
@@ -262,27 +244,13 @@ void readDistance() {
 void flush() {
   Serial.println("Flushing...");
 
-  // if (pos < angle) {
-  //   while(pos <= angle) {
-  //     myservo.write(pos);
-	// 	  delay(10);
-  //     pos += 5; 
-  //   }
-  // } else if (pos > angle) {
-  //   while(pos >= angle) {
-  //     myservo.write(pos);
-	// 	  delay(10);
-  //     pos -= 5; 
-  //   }
-  // }
-
   for (pos = 15; pos <= 150; pos += 5) {
-		myservo.write(pos);
-		delay(10);
-	}
+    myservo.write(pos);
+    delay(10);
+  }
   delay(4000);
-	for (pos = 150; pos >= 15; pos -= 5) {
-		myservo.write(pos);
-		delay(10);
-	}
+  for (pos = 150; pos >= 15; pos -= 5) {
+    myservo.write(pos);
+    delay(10);
+  }
 }
