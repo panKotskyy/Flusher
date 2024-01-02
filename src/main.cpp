@@ -4,6 +4,7 @@
 #include "ElegantOTA.h"
 #include <ESP32Servo.h>
 #include "WiFiManager.h"
+#include "TelegramBot.h"
 
 // Define PINS
 #define SERVO_PIN 13
@@ -29,9 +30,6 @@ float distance;
 int pos = 0;                // variable to store the servo position
 bool newRequest = false;    // Variable to detect whether a new request occurred
 int threshold = 0;          // Sound threshold
-
-AsyncWebServer server(80);
-Servo myservo;
 
 // HTML to build the web page
 const char index_html[] PROGMEM = R"rawliteral(
@@ -96,6 +94,9 @@ void readDistance();
 void flush();
 
 WiFiManager wifiManager(ssid, password);
+AsyncWebServer server(80);
+Servo myservo;
+TelegramBot bot;
 
 void setup() {
   Serial.begin(115200);
@@ -104,6 +105,7 @@ void setup() {
   wifiManager.connect();
   initWebServer();
   initServo();
+  bot.init();
   initSoundDetector();
   initDistanceReader();
   initPir();
@@ -119,6 +121,7 @@ void loop() {
 
   detectSound();
   readDistance();
+  bot.handleTelegram();
 
   if (digitalRead(PIR_PIN) == LOW && lastTimeMovementDetected + 180000 < millis()) {
     // Go to sleep now
