@@ -4,7 +4,8 @@
 #include "ElegantOTA.h"
 #include <ESP32Servo.h>
 #include "WiFiManager.h"
-#include "TelegramBot.h"
+#include <UniversalTelegramBot.h>
+#include <WiFiClientSecure.h>
 
 // Define PINS
 #define SERVO_PIN 13
@@ -17,19 +18,32 @@
 // Define sound speed in cm/uS
 #define SOUND_SPEED 0.034
 
+#define DEEP_SLEEP_INTERVAL 180000
+#define SOUND_THRESHOLD 0
+#define SENSOR_READING_INTERVAL 5000
+
 // Define network credentials
 const char *ssid = "ASUS_60";
 const char *password = "bohdan1010";
 
+#define BOTtoken "5933476596:AAG-mZ1tfNy0boHKzrOdjFmFLCckUIfEClc"
+#define CHAT_ID "-948044538"
+
 RTC_DATA_ATTR int bootCount = 0;
 
-unsigned long lastTimeMovementDetected = 0;
+unsigned long currentMillis;
+unsigned long previousMovementDetected = 0;
+unsigned long previousSensorReading = 0;
 
-long duration;
+int digitalSound;
+int analogSound;
+int minAnalogSound = 99999;
+int maxAnalogSound;
 float distance;
-int pos = 0;                // variable to store the servo position
-bool newRequest = false;    // Variable to detect whether a new request occurred
-int threshold = 0;          // Sound threshold
+float minDistance = 99999;
+float maxDistance;
+int pos;
+bool newRequest = false;
 
 // HTML to build the web page
 const char index_html[] PROGMEM = R"rawliteral(
@@ -54,7 +68,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     </style>
 </head>
 <body>
-    <button onclick="sendPostRequest()">Flush</button>
+    <button onclick="sendPostRequest()">Flush!</button>
 
     <script>
         function sendPostRequest() {
@@ -81,6 +95,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
+void initBot();
 void initWebServer();
 void initServo();
 void initSoundDetector();
@@ -92,11 +107,14 @@ void pirInterrupt();
 void detectSound();
 void readDistance();
 void flush();
+void handleTelegram();
+void handleNewMessages(int numNewMessages);
 
 WiFiManager wifiManager(ssid, password);
 AsyncWebServer server(80);
 Servo myservo;
-TelegramBot bot;
+WiFiClientSecure client;
+UniversalTelegramBot bot(BOTtoken, client);
 
 void setup() {
   Serial.begin(115200);
@@ -105,7 +123,7 @@ void setup() {
   wifiManager.connect();
   initWebServer();
   initServo();
-  bot.init();
+  initBot();
   initSoundDetector();
   initDistanceReader();
   initPir();
@@ -121,16 +139,26 @@ void loop() {
 
   detectSound();
   readDistance();
-  bot.handleTelegram();
 
-  if (digitalRead(PIR_PIN) == LOW && lastTimeMovementDetected + 180000 < millis()) {
+  currentMillis = millis();
+  if (previousSensorReading + SENSOR_READING_INTERVAL < currentMillis) {
+    handleTelegram();
+    previousSensorReading = currentMillis;
+  }
+
+  if (digitalRead(PIR_PIN) == LOW && previousMovementDetected + DEEP_SLEEP_INTERVAL < millis()) {
     // Go to sleep now
     Serial.println("Going to sleep now");
     delay(1000);
     esp_deep_sleep_start();
   }
 
-  delay(500);
+  // delay(500);
+}
+
+void initBot() {
+    client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+    bot.sendMessage(CHAT_ID, "Flusher Started", "");
 }
 
 // Initialize WebServer
@@ -201,17 +229,20 @@ void printWakeupReason() {
 }
 
 void pirInterrupt() {
-  lastTimeMovementDetected = millis();
+  previousMovementDetected = millis();
 }
 
 void detectSound() {
-  int valDigital = digitalRead(SOUND_DIGITAL_PIN);
-  int valAnalog = analogRead(SOUND_ANALOG_PIN);
+  digitalSound = digitalRead(SOUND_DIGITAL_PIN);
+  analogSound = analogRead(SOUND_ANALOG_PIN);
 
-  if (valAnalog > threshold) {
-    Serial.print(valAnalog);
-    Serial.print("\t");
-    Serial.println(valDigital);
+  minAnalogSound = analogSound < minAnalogSound ? analogSound : minAnalogSound;
+  maxAnalogSound = analogSound > maxAnalogSound ? analogSound : maxAnalogSound;
+
+  if (analogSound > SOUND_THRESHOLD) {
+    // Serial.print(analogSound);
+    // Serial.print("\t");
+    // Serial.println(digitalSound);
   }
 }
 
@@ -221,12 +252,71 @@ void readDistance() {
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  duration = pulseIn(ECHO_PIN, HIGH);
+  long duration = pulseIn(ECHO_PIN, HIGH);
 
   distance = duration * SOUND_SPEED / 2;
 
-  Serial.print("Distance (cm): ");
-  Serial.println(distance);
+  minDistance = distance < minDistance ? distance : minDistance;
+  maxDistance = distance > maxDistance ? distance : maxDistance;
+
+  // Serial.print("Distance (cm): ");
+  // Serial.println(distance);
+}
+
+void handleTelegram() {
+  if ((WiFi.getMode() == WIFI_STA) && (WiFi.status() == WL_CONNECTED)) {
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    while (numNewMessages) {
+      Serial.println("got response");
+      handleNewMessages(numNewMessages);
+      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    }
+  }
+}
+
+void handleNewMessages(int numNewMessages) {
+  Serial.println("handleNewMessages");
+  Serial.println(String(numNewMessages));
+
+  for (int i = 0; i < numNewMessages; i++) {
+    // Chat id of the requester
+    String chat_id = String(bot.messages[i].chat_id);
+    if (chat_id != CHAT_ID) {
+      bot.sendMessage(chat_id, "Unauthorized user", "");
+      continue;
+    }
+
+    // Print the received message
+    String text = bot.messages[i].text;
+    String from_name = bot.messages[i].from_name;
+    Serial.printf("Received message: %s\nFrom: %s\n", text, from_name);
+
+    // Handle commands...
+    if (text == "/version") {
+      bot.sendMessage(CHAT_ID, "0.1v Beta", "");
+    }
+    if (text == "/restart") {
+      esp_restart();
+    }
+    if (text == "/help") {
+      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/stat\", \"/flush\"]]", true);
+      bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/stat\", \"/flush\"]]");
+    }
+    if (text == "/flush") {
+      newRequest = true;
+      bot.sendMessage(chat_id, "Flushing...", "");
+    }
+    if (text == "/stat") {
+      String response = "Statistics:\n";
+      response += "Boot Count: " + String(bootCount) + "\n";
+      response += "Movement Detected: " + String(digitalRead(PIR_PIN)) + "\n";
+      response += "Analog Sound (Min/Max): " + String(minAnalogSound) + "/" + String(maxAnalogSound) + "\n";
+      response += "Distance (Min/Max): " + String(minDistance) + "cm/" + String(maxDistance) + "cm";
+
+      bot.sendMessage(chat_id, response, "");
+    }
+  }
 }
 
 void flush() {
