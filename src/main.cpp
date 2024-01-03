@@ -20,7 +20,7 @@
 
 #define DEEP_SLEEP_INTERVAL 180000
 #define SOUND_THRESHOLD 0
-#define SENSOR_READING_INTERVAL 5000
+#define SENSOR_READING_INTERVAL 1000
 
 // Define network credentials
 const char *ssid = "ASUS_60";
@@ -137,11 +137,10 @@ void loop() {
     newRequest = false;
   }
 
-  detectSound();
-  readDistance();
-
   currentMillis = millis();
   if (previousSensorReading + SENSOR_READING_INTERVAL < currentMillis) {
+    detectSound();
+    readDistance();
     handleTelegram();
     previousSensorReading = currentMillis;
   }
@@ -297,11 +296,13 @@ void handleNewMessages(int numNewMessages) {
       bot.sendMessage(CHAT_ID, "0.1v Beta", "");
     }
     if (text == "/restart") {
+      bot.sendMessage(CHAT_ID, "Restaring...", "");
+      bot.getUpdates(bot.last_message_received + 1);
       esp_restart();
     }
     if (text == "/help") {
-      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/stat\", \"/flush\"]]", true);
-      bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/stat\", \"/flush\"]]");
+      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/help\", \"/stat\", \"/flush\", \"/restart\", \"/version\"]]", true);
+      // bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/stat\", \"/flush\", \"/restart\", \"/version\"]]");
     }
     if (text == "/flush") {
       newRequest = true;
