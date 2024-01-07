@@ -5,11 +5,9 @@
 #include <ESP32Servo.h>
 #include "WiFiManager.h"
 #include <UniversalTelegramBot.h>
-#include <WiFiClientSecure.h>
-#include <FirebaseESP32.h>
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
 #include "time.h"
+#include <InfluxDbClient.h>
+#include <InfluxDbCloud.h>
 
 // Define PINS
 #define SERVO_PIN 13
@@ -30,21 +28,20 @@
 const char *ssid = "ASUS_60";
 const char *password = "bohdan1010";
 
-#define API_KEY "AIzaSyDrYZiMsJ-ZG2JxN3060mgpHgKIbvBvCv8"
-// Insert Authorized Email and Corresponding Password
-#define USER_EMAIL "b.kotskyy@gmail.com"
-#define USER_PASSWORD "parachute"
-// Insert RTDB URLefine the RTDB URL
-#define DATABASE_URL "https://flusher-900f7-default-rtdb.europe-west1.firebasedatabase.app"
-
-const char* ntpServer = "pool.ntp.org";
+#define INFLUXDB_URL "https://us-east-1-1.aws.cloud2.influxdata.com"
+#define INFLUXDB_TOKEN "OrddY9ea5LGv5bpZNEdnYrBBn7-4nwL1zrZI_5W-XVYghPNeIbh6a7J-1uNnfzaQsk7E78JHdX7l6ypsZNrXBg=="
+#define INFLUXDB_ORG "d977e787a53d425a"
+#define INFLUXDB_BUCKET "Flusher"
+  
+// Time zone info
+#define TZ_INFO "UTC2"
 
 #define BOTtoken "5933476596:AAG-mZ1tfNy0boHKzrOdjFmFLCckUIfEClc"
 #define CHAT_ID "-948044538"
 
 RTC_DATA_ATTR int bootCount = 0;
-RTC_DATA_ATTR bool deepSleepMode;
-RTC_DATA_ATTR bool sendData;
+RTC_DATA_ATTR bool deepSleepMode = true;
+RTC_DATA_ATTR bool sendData = true;
 
 unsigned long currentMillis;
 unsigned long previousMovementDetected = 0;
@@ -115,12 +112,11 @@ AsyncWebServer server(80);
 Servo myservo;
 WiFiClientSecure client;
 UniversalTelegramBot bot(BOTtoken, client);
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
-String uid;
-int timestamp;
-FirebaseJson json;
+// InfluxDB client instance with preconfigured InfluxCloud certificate
+InfluxDBClient dbClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
+
+// Data point
+Point sensorReadings("measurements");
 
 void initBot();
 void initWebServer();
@@ -128,7 +124,6 @@ void initServo();
 void initSoundDetector();
 void initDistanceReader();
 void initPir();
-void initFirebase();
 void printWakeupReason();
 
 void pirInterrupt();
@@ -162,8 +157,19 @@ void setup() {
   initSoundDetector();
   initDistanceReader();
   initPir();
-  configTime(0, 0, ntpServer);
-  initFirebase();
+
+  // Accurate time is necessary for certificate validation
+  // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
+  // Syncing progress and the time will be printed to Serial
+  timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
+
+  if (dbClient.validateConnection()) {
+    Serial.print("Connected to InfluxDB: ");
+    Serial.println(dbClient.getServerUrl());
+  } else {
+    Serial.print("InfluxDB connection failed: ");
+    Serial.println(dbClient.getLastErrorMessage());
+  }
 
   printWakeupReason();
 }
@@ -189,6 +195,7 @@ void loop() {
     // Go to sleep now
     Serial.println("Going to sleep now");
     delay(1000);
+    bot.sendMessage(CHAT_ID, "Going to deep sleep...", "");
     esp_deep_sleep_start();
   }
 
@@ -241,41 +248,6 @@ void initPir() {
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
 }
 
-void initFirebase() {
-  // Assign the api key (required)
-  config.api_key = API_KEY;
-
-  // Assign the user sign in credentials
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-
-  // Assign the RTDB URL (required)
-  config.database_url = DATABASE_URL;
-
-  Firebase.reconnectWiFi(true);
-  fbdo.setResponseSize(4096);
-
-  // Assign the callback function for the long running token generation task */
-  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
-
-  // Assign the maximum retry of token generation
-  config.max_token_generation_retry = 5;
-
-  // Initialize the library with the Firebase authen and config
-  Firebase.begin(&config, &auth);
-
-  // Getting the user UID might take a few seconds
-  Serial.println("Getting User UID");
-  while ((auth.token.uid) == "") {
-    Serial.print('.');
-    delay(1000);
-  }
-  // Print user UID
-  uid = auth.token.uid.c_str();
-  Serial.print("User UID: ");
-  Serial.println(uid);
-}
-
 void printWakeupReason() {
   esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
 
@@ -309,7 +281,7 @@ void detectSound() {
   digitalSound = digitalRead(SOUND_DIGITAL_PIN);
   analogSound = analogRead(SOUND_ANALOG_PIN);
 
-  minAnalogSound = analogSound < minAnalogSound ? analogSound : minAnalogSound;
+  minAnalogSound = analogSound > 0 && analogSound < minAnalogSound ? analogSound : minAnalogSound;
   maxAnalogSound = analogSound > maxAnalogSound ? analogSound : maxAnalogSound;
 
   if (analogSound > SOUND_THRESHOLD) {
@@ -329,7 +301,7 @@ void readDistance() {
 
   distance = duration * SOUND_SPEED / 2;
 
-  minDistance = distance < minDistance ? distance : minDistance;
+  minDistance = distance > 0 && distance < minDistance ? distance : minDistance;
   maxDistance = distance > maxDistance ? distance : maxDistance;
 
   // Serial.print("Distance (cm): ");
@@ -349,50 +321,26 @@ void handleTelegram() {
 }
 
 void storeData() {
-  if (Firebase.ready()) {
-    //Get current timestamp
-    int timestamp = getTime();
-    Serial.print ("time: ");
-    Serial.println (timestamp);
+      // Add readings as fields to point
+    sensorReadings.addField("bootCount", bootCount);
+    sensorReadings.addField("movement", digitalRead(PIR_PIN));
+    sensorReadings.addField("distance", distance);
+    sensorReadings.addField("minDistance", minDistance);
+    sensorReadings.addField("maxDistance", maxDistance);
+    sensorReadings.addField("digitalSound", digitalSound);
+    sensorReadings.addField("analogSound", analogSound);
+    sensorReadings.addField("minAnalogSound", minAnalogSound);
+    sensorReadings.addField("maxAnalogSound", maxAnalogSound);
 
-    json.set(F("/bootCount"), bootCount);
-    json.set(F("/movement"), digitalRead(PIR_PIN));
-    json.set(F("/distance"), distance);
-    json.set(F("/minDistance"), minDistance);
-    json.set(F("/maxDistance"), maxDistance);
-    json.set(F("/digitalSound"), digitalSound);
-    json.set(F("/analogSound"), analogSound);
-    json.set(F("/minAnalogSound"), minAnalogSound);
-    json.set(F("/maxAnalogSound"), maxAnalogSound);
-    
-    // Serial.printf("Set bootCount... %s\n", Firebase.setInt(fbdo, F("/test/bootCount"), bootCount) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get bootCount... %s\n", Firebase.getInt(fbdo, F("/test/bootCount")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set movement... %s\n", Firebase.setInt(fbdo, F("/test/movement"), digitalRead(PIR_PIN)) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get movement... %s\n", Firebase.getInt(fbdo, F("/test/movement")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set distance... %s\n", Firebase.setFloat(fbdo, F("/test/distance"), distance) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get distance... %s\n", Firebase.getFloat(fbdo, F("/test/distance")) ? String(fbdo.to<float>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set minDistance... %s\n", Firebase.setFloat(fbdo, F("/test/minDistance"), minDistance) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get minDistance... %s\n", Firebase.getFloat(fbdo, F("/test/minDistance")) ? String(fbdo.to<float>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set maxDistance... %s\n", Firebase.setFloat(fbdo, F("/test/maxDistance"), maxDistance) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get maxDistance... %s\n", Firebase.getFloat(fbdo, F("/test/maxDistance")) ? String(fbdo.to<float>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set digitalSound... %s\n", Firebase.setInt(fbdo, F("/test/digitalSound"), digitalSound) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get digitalSound... %s\n", Firebase.getInt(fbdo, F("/test/digitalSound")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set analogSound... %s\n", Firebase.setInt(fbdo, F("/test/analogSound"), analogSound) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get analogSound... %s\n", Firebase.getInt(fbdo, F("/test/analogSound")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set minAnalogSound... %s\n", Firebase.setInt(fbdo, F("/test/minAnalogSound"), minAnalogSound) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get minAnalogSound... %s\n", Firebase.getInt(fbdo, F("/test/minAnalogSound")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
-    // Serial.printf("Set maxAnalogSound... %s\n", Firebase.setInt(fbdo, F("/test/maxAnalogSound"), maxAnalogSound) ? "ok" : fbdo.errorReason().c_str());
-    // Serial.printf("Get maxAnalogSound... %s\n", Firebase.getInt(fbdo, F("/test/maxAnalogSound")) ? String(fbdo.to<int>()).c_str() : fbdo.errorReason().c_str());
+    // Print what are we exactly writing
+    Serial.print("Writing: ");
+    Serial.println(dbClient.pointToLineProtocol(sensorReadings));
+  
+    // Write point into buffer
+    dbClient.writePoint(sensorReadings);
 
-    String path = "/test/";
-    path += String(timestamp);
-
-    Serial.printf("Set json... %s\n", Firebase.set(fbdo, path.c_str(), json) ? "ok" : fbdo.errorReason().c_str());
-  }
-  else {
-    Serial.println("FAILED");
-    Serial.printf("REASON: %s", fbdo.errorReason());
-  }
+    // Clear fields for next usage. Tags remain the same.
+    sensorReadings.clearFields();
 }
 
 void handleNewMessages(int numNewMessages) {
