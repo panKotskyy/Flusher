@@ -20,9 +20,10 @@
 // Define sound speed in cm/uS
 #define SOUND_SPEED 0.034
 
-#define DEEP_SLEEP_INTERVAL 180000
+#define DEEP_SLEEP_INTERVAL 3
 #define SOUND_THRESHOLD 0
-#define SENSOR_READING_INTERVAL 1000
+#define SENSOR_READING_INTERVAL 1
+#define AUTO_FLUSH_DELAY 150
 
 // Define network credentials
 const char *ssid = "ASUS_60";
@@ -40,20 +41,26 @@ const char *password = "bohdan1010";
 #define CHAT_ID "-948044538"
 
 RTC_DATA_ATTR int bootCount = 0;
+RTC_DATA_ATTR int bootCountInterrupt = 0;
 RTC_DATA_ATTR bool deepSleepMode = true;
 RTC_DATA_ATTR bool sendData = true;
+RTC_DATA_ATTR bool debug = true;
 
 unsigned long currentMillis;
-unsigned long previousMovementDetected = 0;
+RTC_DATA_ATTR unsigned long previousMovementDetected;
 unsigned long previousSensorReading = 0;
+
+RTC_DATA_ATTR float defaultDistance;
+RTC_DATA_ATTR bool movementOnSeat;
+RTC_DATA_ATTR unsigned long previousMovementOnSeat = 0;
 
 int digitalSound;
 int analogSound;
 int minAnalogSound = 99999;
 int maxAnalogSound;
 float distance;
-float minDistance = 99999;
-float maxDistance;
+RTC_DATA_ATTR float minDistance = 99999;
+RTC_DATA_ATTR float maxDistance;
 int pos;
 bool newRequest = false;
 
@@ -127,7 +134,7 @@ void initPir();
 void printWakeupReason();
 
 void pirInterrupt();
-void detectSound();
+void readSound();
 void readDistance();
 void flush();
 void handleTelegram();
@@ -139,7 +146,7 @@ unsigned long getTime() {
   time_t now;
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    //Serial.println("Failed to obtain time");
+    Serial.println("Failed to obtain time");
     return(0);
   }
   time(&now);
@@ -149,6 +156,9 @@ unsigned long getTime() {
 void setup() {
   Serial.begin(115200);
   ++bootCount;
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+    ++bootCountInterrupt;
+  }
 
   wifiManager.connect();
   initWebServer();
@@ -157,6 +167,13 @@ void setup() {
   initSoundDetector();
   initDistanceReader();
   initPir();
+
+  if (!defaultDistance) {
+    readDistance();
+    defaultDistance = distance;
+    bot.sendMessage(CHAT_ID, "Reset reason: " + String(esp_reset_reason()));
+    bot.sendMessage(CHAT_ID, "Default distance: " + String(defaultDistance));
+  }
 
   // Accurate time is necessary for certificate validation
   // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
@@ -175,27 +192,55 @@ void setup() {
 }
 
 void loop() {
-  if (newRequest) {
-    flush();
-    newRequest = false;
-  }
-
-  currentMillis = millis();
+  currentMillis = getTime();
   if (previousSensorReading + SENSOR_READING_INTERVAL < currentMillis) {
-    detectSound();
+    readSound();
     readDistance();
-    handleTelegram();
     previousSensorReading = currentMillis;
-    if (sendData) {
+    if (sendData && distance > 0 && distance < 100) {
       storeData();
     }
   }
 
-  if (deepSleepMode && digitalRead(PIR_PIN) == LOW && previousMovementDetected + DEEP_SLEEP_INTERVAL < millis()) {
+  handleTelegram();
+
+  // currentMillis = getTime();
+  Serial.printf("isAuto: %d %d %d\n", digitalRead(PIR_PIN) == LOW, movementOnSeat, previousMovementDetected + AUTO_FLUSH_DELAY < currentMillis);
+  Serial.printf("millis: %d %d\n", previousMovementDetected, currentMillis);
+  if (digitalRead(PIR_PIN) == LOW && movementOnSeat && previousMovementDetected + AUTO_FLUSH_DELAY < currentMillis) {
+    bot.sendMessage(CHAT_ID, "Auto Flush");
+    newRequest = true;
+  }
+  
+  if (distance < 8 && distance > 0) {
+    bot.sendMessage(CHAT_ID, "Manual Flush");
+    newRequest = true;
+  } 
+
+  if (newRequest) {
+    flush();
+    movementOnSeat = false;
+    newRequest = false;
+  }
+
+  if (distance < defaultDistance - 5 && distance > 0) {
+    if (!movementOnSeat) {
+      bot.sendMessage(CHAT_ID, "Movement DETECTED (" + String(distance) + ")");
+    }
+    previousMovementDetected = currentMillis;
+    movementOnSeat = true;
+  }
+
+  if (deepSleepMode && digitalRead(PIR_PIN) == LOW) {
     // Go to sleep now
     Serial.println("Going to sleep now");
     delay(1000);
-    bot.sendMessage(CHAT_ID, "Going to deep sleep...", "");
+    // bot.sendMessage(CHAT_ID, "Going to deep sleep...", "");
+    if (debug || movementOnSeat) {
+      esp_sleep_enable_timer_wakeup(180000000); // 3 min
+    } else {
+      esp_sleep_enable_timer_wakeup(3600000000); // 60 min
+    }
     esp_deep_sleep_start();
   }
 
@@ -204,7 +249,7 @@ void loop() {
 
 void initBot() {
     client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
-    bot.sendMessage(CHAT_ID, "Flusher Started", "");
+    // bot.sendMessage(CHAT_ID, "Flusher Started", "");
 }
 
 // Initialize WebServer
@@ -244,7 +289,7 @@ void initDistanceReader() {
 
 void initPir() {
   pinMode(PIR_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(PIR_PIN), pirInterrupt, RISING);
+  // attachInterrupt(digitalPinToInterrupt(PIR_PIN), pirInterrupt, FALLING);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
 }
 
@@ -274,10 +319,10 @@ void printWakeupReason() {
 }
 
 void pirInterrupt() {
-  previousMovementDetected = millis();
+  previousMovementDetected = getTime();
 }
 
-void detectSound() {
+void readSound() {
   digitalSound = digitalRead(SOUND_DIGITAL_PIN);
   analogSound = analogRead(SOUND_ANALOG_PIN);
 
@@ -285,9 +330,9 @@ void detectSound() {
   maxAnalogSound = analogSound > maxAnalogSound ? analogSound : maxAnalogSound;
 
   if (analogSound > SOUND_THRESHOLD) {
-    // Serial.print(analogSound);
-    // Serial.print("\t");
-    // Serial.println(digitalSound);
+    Serial.print(analogSound);
+    Serial.print("\t");
+    Serial.println(digitalSound);
   }
 }
 
@@ -304,8 +349,8 @@ void readDistance() {
   minDistance = distance > 0 && distance < minDistance ? distance : minDistance;
   maxDistance = distance > maxDistance ? distance : maxDistance;
 
-  // Serial.print("Distance (cm): ");
-  // Serial.println(distance);
+  Serial.print("Distance (cm): ");
+  Serial.println(distance);
 }
 
 void handleTelegram() {
@@ -325,12 +370,8 @@ void storeData() {
     sensorReadings.addField("bootCount", bootCount);
     sensorReadings.addField("movement", digitalRead(PIR_PIN));
     sensorReadings.addField("distance", distance);
-    sensorReadings.addField("minDistance", minDistance);
-    sensorReadings.addField("maxDistance", maxDistance);
     sensorReadings.addField("digitalSound", digitalSound);
     sensorReadings.addField("analogSound", analogSound);
-    sensorReadings.addField("minAnalogSound", minAnalogSound);
-    sensorReadings.addField("maxAnalogSound", maxAnalogSound);
 
     // Print what are we exactly writing
     Serial.print("Writing: ");
@@ -370,12 +411,20 @@ void handleNewMessages(int numNewMessages) {
       esp_restart();
     }
     if (text == "/help") {
-      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/help\", \"/stat\", \"/flush\", \"/restart\", \"/version\"]]", true);
-      // bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/stat\", \"/flush\", \"/restart\", \"/version\"]]");
+      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/debug\", \"/stat\", \"/flush\", \"/sendData\"], [\"/deepSleep\", \"/restart\", \"/version\"]]", true);
+      // bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/debug\", \"/stat\", \"/flush\", \"/sendData\", \"/deepSleep\", \"/restart\", \"/version\"]]");
     }
     if (text == "/flush") {
       newRequest = true;
       bot.sendMessage(chat_id, "Flushing...", "");
+    }
+    if (text == "/cancel") {
+      movementOnSeat = false;
+      bot.sendMessage(chat_id, "Flushing canceled", "");
+    }
+    if (text == "/debug") {
+      debug = !debug;
+      bot.sendMessage(CHAT_ID, String(debug), "");
     }
     if (text == "/sendData") {
       sendData = !sendData;
@@ -388,24 +437,32 @@ void handleNewMessages(int numNewMessages) {
     if (text == "/stat") {
       String response = "Boot Count: ";
       response += String(bootCount);
+      response += "\nBoot Count Interrupt: ";
+      response += String(bootCountInterrupt);
+      response += "\nDebug: ";
+      response += debug ? "Yes" : "No";
       response += "\nMovement Detected: ";
-      response += String(digitalRead(PIR_PIN));
-      response += "\nDistance: ";
+      response += digitalRead(PIR_PIN) ? "Yes" : "No";
+      response += "\nMovement On Seat: ";
+      response += movementOnSeat ? "Yes" : "No";
+      response += "\nDefault Distance: ";
+      response += String(defaultDistance);
+      response += "\nDistance (min/max): ";
       response += String(distance);
-      response += "\nMin: ";
+      response += " (";
       response += String(minDistance);
-      response += "\nMax: ";
+      response += "/";
       response += String(maxDistance);
-      response += "\nAnalog Sound: ";
+      response += ")\nAnalog Sound (min/max): ";
       response += String(analogSound);
-      response += "\nMin: ";
+      response += " (";
       response += String(minAnalogSound);
-      response += "\nMax: ";
+      response += "/";
       response += String(maxAnalogSound);
-      response += "\nDeep Sleep Mode: ";
-      response += String(deepSleepMode);
+      response += ")\nDeep Sleep Mode: ";
+      response += deepSleepMode ? "Yes" : "No";
       response += "\nSend Data: ";
-      response += String(sendData);
+      response += sendData ? "Yes" : "No";
 
       bot.sendMessage(chat_id, response, "");
     }

@@ -11,7 +11,7 @@ private:
   const char* password;
 
   static unsigned long lastTimeWiFiReconnects;
-  static const long wifiReconnectInterval = 30000;
+  static const long wifiReconnectInterval = 10000;
 
   static void onStationConnected(WiFiEvent_t event, WiFiEventInfo_t info);
   static void onGotIP(WiFiEvent_t event, WiFiEventInfo_t info);

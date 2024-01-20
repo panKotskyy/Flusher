@@ -13,10 +13,18 @@ void WiFiManager::connect() {
   WiFi.onEvent(onStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi ..");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
-  }
+  // unsigned long startAttemptTime = millis();
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   Serial.print('.');
+  //   delay(1000);
+
+  //   // Check if 30 seconds have elapsed
+  //   if (millis() - startAttemptTime >= 30000) {
+  //     Serial.println("\nFailed to connect within 30 seconds.");
+  //     break;
+  //     // ESP.restart(); // Restart the ESP
+  //   }
+  // }
 }
 
 void WiFiManager::onStationConnected(WiFiEvent_t event, WiFiEventInfo_t info) {
