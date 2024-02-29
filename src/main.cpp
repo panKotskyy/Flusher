@@ -20,6 +20,7 @@
 // Define sound speed in cm/uS
 #define SOUND_SPEED 0.034
 
+// Config
 #define DEEP_SLEEP_INTERVAL 3
 #define SOUND_THRESHOLD 0
 #define SENSOR_READING_INTERVAL 1
@@ -41,27 +42,28 @@ const char *password = "bohdan1010";
 #define CHAT_ID "-948044538"
 
 RTC_DATA_ATTR int bootCount = 0;
-RTC_DATA_ATTR int bootCountInterrupt = 0;
+RTC_DATA_ATTR int interruptBootCount = 0;
 RTC_DATA_ATTR bool deepSleepMode = true;
 RTC_DATA_ATTR bool sendData = true;
 RTC_DATA_ATTR bool debug = true;
+RTC_DATA_ATTR bool enableManual = false;
 
-unsigned long currentMillis;
-RTC_DATA_ATTR unsigned long previousMovementDetected;
+unsigned long now;
 unsigned long previousSensorReading = 0;
 
 RTC_DATA_ATTR float defaultDistance;
-RTC_DATA_ATTR bool movementOnSeat;
-RTC_DATA_ATTR unsigned long previousMovementOnSeat = 0;
+RTC_DATA_ATTR bool movementDetected;
+RTC_DATA_ATTR unsigned long previousMovement;
 
+float distance;
 int digitalSound;
 int analogSound;
+
 int minAnalogSound = 99999;
 int maxAnalogSound;
-float distance;
 RTC_DATA_ATTR float minDistance = 99999;
 RTC_DATA_ATTR float maxDistance;
-int pos;
+
 bool newRequest = false;
 
 // HTML to build the web page
@@ -119,11 +121,8 @@ AsyncWebServer server(80);
 Servo myservo;
 WiFiClientSecure client;
 UniversalTelegramBot bot(BOTtoken, client);
-// InfluxDB client instance with preconfigured InfluxCloud certificate
 InfluxDBClient dbClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
-
-// Data point
-Point sensorReadings("measurements");
+Point measurments("measurements");
 
 void initBot();
 void initWebServer();
@@ -133,7 +132,6 @@ void initDistanceReader();
 void initPir();
 void printWakeupReason();
 
-void pirInterrupt();
 void readSound();
 void readDistance();
 void flush();
@@ -153,11 +151,22 @@ unsigned long getTime() {
   return now;
 }
 
+String getTimeFormatted(unsigned long &ts) {
+  struct tm timeinfo;
+  time_t timestamp = ts;
+  gmtime_r(&timestamp, &timeinfo);
+  char formattedTime[9];
+  strftime(formattedTime, sizeof(formattedTime), "%H:%M:%S", &timeinfo);
+
+  return String(formattedTime);
+}
+
 void setup() {
   Serial.begin(115200);
+  
   ++bootCount;
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
-    ++bootCountInterrupt;
+    ++interruptBootCount;
   }
 
   wifiManager.connect();
@@ -172,12 +181,9 @@ void setup() {
     readDistance();
     defaultDistance = distance;
     bot.sendMessage(CHAT_ID, "Reset reason: " + String(esp_reset_reason()));
-    bot.sendMessage(CHAT_ID, "Default distance: " + String(defaultDistance));
+    bot.sendMessage(CHAT_ID, "Default distance: " + String(defaultDistance, 1));
   }
 
-  // Accurate time is necessary for certificate validation
-  // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
-  // Syncing progress and the time will be printed to Serial
   timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
 
   if (dbClient.validateConnection()) {
@@ -192,11 +198,11 @@ void setup() {
 }
 
 void loop() {
-  currentMillis = getTime();
-  if (previousSensorReading + SENSOR_READING_INTERVAL < currentMillis) {
+  now = getTime();
+  if (now - previousSensorReading > SENSOR_READING_INTERVAL) {
     readSound();
     readDistance();
-    previousSensorReading = currentMillis;
+    previousSensorReading = now;
     if (sendData && distance > 0 && distance < 100) {
       storeData();
     }
@@ -204,52 +210,43 @@ void loop() {
 
   handleTelegram();
 
-  // currentMillis = getTime();
-  Serial.printf("isAuto: %d %d %d\n", digitalRead(PIR_PIN) == LOW, movementOnSeat, previousMovementDetected + AUTO_FLUSH_DELAY < currentMillis);
-  Serial.printf("millis: %d %d\n", previousMovementDetected, currentMillis);
-  if (digitalRead(PIR_PIN) == LOW && movementOnSeat && previousMovementDetected + AUTO_FLUSH_DELAY < currentMillis) {
+  if (enableManual && distance < 8 && distance > 0) {
+    bot.sendMessage(CHAT_ID, "Manual Flush");
+    newRequest = true;
+  } else if (distance < defaultDistance - 5 && distance > 0) {
+    if (!movementDetected) {
+      bot.sendMessage(CHAT_ID, "Movement DETECTED (" + String(distance, 1) + " cm)");
+    }
+    previousMovement = now;
+    movementDetected = true;
+  }
+
+  if (digitalRead(PIR_PIN) == LOW && movementDetected && now - previousMovement > AUTO_FLUSH_DELAY) {
     bot.sendMessage(CHAT_ID, "Auto Flush");
     newRequest = true;
   }
-  
-  if (distance < 8 && distance > 0) {
-    bot.sendMessage(CHAT_ID, "Manual Flush");
-    newRequest = true;
-  } 
 
   if (newRequest) {
     flush();
-    movementOnSeat = false;
+    movementDetected = false;
     newRequest = false;
   }
 
-  if (distance < defaultDistance - 5 && distance > 0) {
-    if (!movementOnSeat) {
-      bot.sendMessage(CHAT_ID, "Movement DETECTED (" + String(distance) + ")");
-    }
-    previousMovementDetected = currentMillis;
-    movementOnSeat = true;
-  }
-
   if (deepSleepMode && digitalRead(PIR_PIN) == LOW) {
-    // Go to sleep now
     Serial.println("Going to sleep now");
     delay(1000);
-    // bot.sendMessage(CHAT_ID, "Going to deep sleep...", "");
-    if (debug || movementOnSeat) {
+    // bot.sendMessage(CHAT_ID, "Going to deep sleep...");
+    if (debug || movementDetected) {
       esp_sleep_enable_timer_wakeup(180000000); // 3 min
     } else {
       esp_sleep_enable_timer_wakeup(3600000000); // 60 min
     }
     esp_deep_sleep_start();
   }
-
-  // delay(500);
 }
 
 void initBot() {
     client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
-    // bot.sendMessage(CHAT_ID, "Flusher Started", "");
 }
 
 // Initialize WebServer
@@ -289,7 +286,6 @@ void initDistanceReader() {
 
 void initPir() {
   pinMode(PIR_PIN, INPUT);
-  // attachInterrupt(digitalPinToInterrupt(PIR_PIN), pirInterrupt, FALLING);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
 }
 
@@ -316,10 +312,6 @@ void printWakeupReason() {
       Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeupReason);
       break;
   }
-}
-
-void pirInterrupt() {
-  previousMovementDetected = getTime();
 }
 
 void readSound() {
@@ -358,7 +350,6 @@ void handleTelegram() {
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
 
     while (numNewMessages) {
-      Serial.println("got response");
       handleNewMessages(numNewMessages);
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
@@ -366,22 +357,18 @@ void handleTelegram() {
 }
 
 void storeData() {
-      // Add readings as fields to point
-    sensorReadings.addField("bootCount", bootCount);
-    sensorReadings.addField("movement", digitalRead(PIR_PIN));
-    sensorReadings.addField("distance", distance);
-    sensorReadings.addField("digitalSound", digitalSound);
-    sensorReadings.addField("analogSound", analogSound);
+    measurments.addField("bootCount", bootCount);
+    measurments.addField("interruptBootCount", interruptBootCount);
+    measurments.addField("movement", digitalRead(PIR_PIN));
+    measurments.addField("distance", distance);
+    measurments.addField("digitalSound", digitalSound);
+    measurments.addField("analogSound", analogSound);
 
-    // Print what are we exactly writing
     Serial.print("Writing: ");
-    Serial.println(dbClient.pointToLineProtocol(sensorReadings));
+    Serial.println(dbClient.pointToLineProtocol(measurments));
   
-    // Write point into buffer
-    dbClient.writePoint(sensorReadings);
-
-    // Clear fields for next usage. Tags remain the same.
-    sensorReadings.clearFields();
+    dbClient.writePoint(measurments);
+    measurments.clearFields();
 }
 
 void handleNewMessages(int numNewMessages) {
@@ -392,7 +379,7 @@ void handleNewMessages(int numNewMessages) {
     // Chat id of the requester
     String chat_id = String(bot.messages[i].chat_id);
     if (chat_id != CHAT_ID) {
-      bot.sendMessage(chat_id, "Unauthorized user", "");
+      bot.sendMessage(chat_id, "Unauthorized user");
       continue;
     }
 
@@ -402,67 +389,62 @@ void handleNewMessages(int numNewMessages) {
     Serial.printf("Received message: %s\nFrom: %s\n", text, from_name);
 
     // Handle commands...
+    if (text == "/help") {
+      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/version\", \"/stat\", \"/flush\", \"/cancel\"], [\"/debug\", \"/deepSleep\", \"/sendData\", \"/restart\"]]", true);
+      // bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/debug\", \"/stat\", \"/flush\", \"/sendData\", \"/deepSleep\", \"/restart\", \"/version\"]]");
+    }
     if (text == "/version") {
-      bot.sendMessage(CHAT_ID, "0.1v Beta", "");
+      bot.sendMessage(CHAT_ID, "0.1v Beta");
     }
     if (text == "/restart") {
-      bot.sendMessage(CHAT_ID, "Restaring...", "");
+      bot.sendMessage(CHAT_ID, "Restaring...");
       bot.getUpdates(bot.last_message_received + 1);
       esp_restart();
     }
-    if (text == "/help") {
-      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/debug\", \"/stat\", \"/flush\", \"/sendData\"], [\"/deepSleep\", \"/restart\", \"/version\"]]", true);
-      // bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/debug\", \"/stat\", \"/flush\", \"/sendData\", \"/deepSleep\", \"/restart\", \"/version\"]]");
-    }
     if (text == "/flush") {
       newRequest = true;
-      bot.sendMessage(chat_id, "Flushing...", "");
+      bot.sendMessage(chat_id, "Flushing...");
     }
     if (text == "/cancel") {
-      movementOnSeat = false;
-      bot.sendMessage(chat_id, "Flushing canceled", "");
+      movementDetected = false;
+      bot.sendMessage(chat_id, "Flushing canceled");
     }
     if (text == "/debug") {
       debug = !debug;
-      bot.sendMessage(CHAT_ID, String(debug), "");
+      bot.sendMessage(CHAT_ID, debug ? "Debug is ON" : "Debug is OFF");
+    }
+    if (text == "/manual") {
+      enableManual = !enableManual;
+      bot.sendMessage(CHAT_ID, enableManual ? "Manual Flush is ON" : "Manual Flush is OFF");
     }
     if (text == "/sendData") {
       sendData = !sendData;
-      bot.sendMessage(CHAT_ID, String(sendData), "");
+      bot.sendMessage(CHAT_ID, sendData ? "Send Data is ON" : "Send Data is OFF");
     }
     if (text == "/deepSleep") {
       deepSleepMode = !deepSleepMode;
-      bot.sendMessage(CHAT_ID, String(deepSleepMode), "");
+      bot.sendMessage(CHAT_ID, deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
     }
     if (text == "/stat") {
-      String response = "Boot Count: ";
-      response += String(bootCount);
-      response += "\nBoot Count Interrupt: ";
-      response += String(bootCountInterrupt);
-      response += "\nDebug: ";
-      response += debug ? "Yes" : "No";
-      response += "\nMovement Detected: ";
-      response += digitalRead(PIR_PIN) ? "Yes" : "No";
-      response += "\nMovement On Seat: ";
-      response += movementOnSeat ? "Yes" : "No";
-      response += "\nDefault Distance: ";
-      response += String(defaultDistance);
-      response += "\nDistance (min/max): ";
-      response += String(distance);
-      response += " (";
-      response += String(minDistance);
-      response += "/";
-      response += String(maxDistance);
-      response += ")\nAnalog Sound (min/max): ";
-      response += String(analogSound);
-      response += " (";
-      response += String(minAnalogSound);
-      response += "/";
-      response += String(maxAnalogSound);
-      response += ")\nDeep Sleep Mode: ";
-      response += deepSleepMode ? "Yes" : "No";
-      response += "\nSend Data: ";
-      response += sendData ? "Yes" : "No";
+      String response = "Boot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")"
+      + "\nDebug: " + (debug ? "ON" : "OFF")
+      + "\nDeep Sleep: " + (deepSleepMode ? "ON" : "OFF")
+      + "\nSend Data: " + (sendData ? "ON" : "OFF")
+      + "\nManual Flush: " + (enableManual ? "ON" : "OFF")
+      + "\nDefault Distance: " + String(defaultDistance, 1)
+
+      + "\n\nPIR: " + (digitalRead(PIR_PIN) ? "HIGH" : "LOW")
+      + "\nMovement Detected: " + (movementDetected ? "Yes" : "No")
+      + "\nMovement Time: " + getTimeFormatted(previousMovement)
+
+      + "\n\nDistance: " + String(distance, 1)
+      + "\nMax Distance: " + String(maxDistance, 1)
+      + "\nMin Distance: " + String(minDistance, 1)
+
+      + "\n\nDigital Sound: " + (digitalSound ? "HIGH" : "LOW")
+      + "\nAnalog Sound: " + String(analogSound)
+      + "\nMax Analog Sound: " + String(maxAnalogSound)
+      + "\nMin Analog Sound: " + String(minAnalogSound);
 
       bot.sendMessage(chat_id, response, "");
     }
@@ -471,13 +453,12 @@ void handleNewMessages(int numNewMessages) {
 
 void flush() {
   Serial.println("Flushing...");
-
-  for (pos = 15; pos <= 150; pos += 5) {
+  for (int pos = 15; pos <= 150; pos += 5) {
     myservo.write(pos);
     delay(10);
   }
   delay(4000);
-  for (pos = 150; pos >= 15; pos -= 5) {
+  for (int pos = 150; pos >= 15; pos -= 5) {
     myservo.write(pos);
     delay(10);
   }
