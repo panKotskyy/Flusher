@@ -47,6 +47,7 @@ RTC_DATA_ATTR bool deepSleepMode = true;
 RTC_DATA_ATTR bool sendData = true;
 RTC_DATA_ATTR bool debug = true;
 RTC_DATA_ATTR bool enableManual = false;
+RTC_DATA_ATTR bool enableAuto = true;
 
 unsigned long now;
 unsigned long previousSensorReading = 0;
@@ -213,7 +214,7 @@ void loop() {
   if (enableManual && distance < 8 && distance > 0) {
     bot.sendMessage(CHAT_ID, "Manual Flush");
     newRequest = true;
-  } else if (distance < defaultDistance - 5 && distance > 0) {
+  } else if (defaultDistance - distance > 5 && distance > 0) {
     if (!movementDetected) {
       bot.sendMessage(CHAT_ID, "Movement DETECTED (" + String(distance, 1) + " cm)");
     }
@@ -221,7 +222,7 @@ void loop() {
     movementDetected = true;
   }
 
-  if (digitalRead(PIR_PIN) == LOW && movementDetected && now - previousMovement > AUTO_FLUSH_DELAY) {
+  if (enableAuto && digitalRead(PIR_PIN) == LOW && defaultDistance - distance < 1 && movementDetected && now - previousMovement > AUTO_FLUSH_DELAY) {
     bot.sendMessage(CHAT_ID, "Auto Flush");
     newRequest = true;
   }
@@ -417,6 +418,10 @@ void handleNewMessages(int numNewMessages) {
       enableManual = !enableManual;
       bot.sendMessage(CHAT_ID, enableManual ? "Manual Flush is ON" : "Manual Flush is OFF");
     }
+    if (text == "/auto") {
+      enableAuto = !enableAuto;
+      bot.sendMessage(CHAT_ID, enableAuto ? "Auto Flush is ON" : "Manual Flush is OFF");
+    }
     if (text == "/sendData") {
       sendData = !sendData;
       bot.sendMessage(CHAT_ID, sendData ? "Send Data is ON" : "Send Data is OFF");
@@ -426,25 +431,27 @@ void handleNewMessages(int numNewMessages) {
       bot.sendMessage(CHAT_ID, deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
     }
     if (text == "/stat") {
-      String response = "Boot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")"
+      String response = "IP: http://" + String(WiFi.localIP())
+      + "\nBoot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")"
       + "\nDebug: " + (debug ? "ON" : "OFF")
       + "\nDeep Sleep: " + (deepSleepMode ? "ON" : "OFF")
       + "\nSend Data: " + (sendData ? "ON" : "OFF")
       + "\nManual Flush: " + (enableManual ? "ON" : "OFF")
-      + "\nDefault Distance: " + String(defaultDistance, 1)
+      + "\nAuto Flush: " + (enableAuto ? "ON" : "OFF")
 
       + "\n\nPIR: " + (digitalRead(PIR_PIN) ? "HIGH" : "LOW")
       + "\nMovement Detected: " + (movementDetected ? "Yes" : "No")
       + "\nMovement Time: " + getTimeFormatted(previousMovement)
 
       + "\n\nDistance: " + String(distance, 1)
+      + "\nDefault Distance: " + String(defaultDistance, 1)
       + "\nMax Distance: " + String(maxDistance, 1)
-      + "\nMin Distance: " + String(minDistance, 1)
+      + "\nMin Distance: " + String(minDistance, 1);
 
-      + "\n\nDigital Sound: " + (digitalSound ? "HIGH" : "LOW")
-      + "\nAnalog Sound: " + String(analogSound)
-      + "\nMax Analog Sound: " + String(maxAnalogSound)
-      + "\nMin Analog Sound: " + String(minAnalogSound);
+      // + "\n\nDigital Sound: " + (digitalSound ? "HIGH" : "LOW")
+      // + "\nAnalog Sound: " + String(analogSound)
+      // + "\nMax Analog Sound: " + String(maxAnalogSound)
+      // + "\nMin Analog Sound: " + String(minAnalogSound);
 
       bot.sendMessage(chat_id, response, "");
     }
@@ -453,6 +460,9 @@ void handleNewMessages(int numNewMessages) {
 
 void flush() {
   Serial.println("Flushing...");
+  if (!myservo.attached()) {
+    myservo.attach(SERVO_PIN);
+  }
   for (int pos = 15; pos <= 150; pos += 5) {
     myservo.write(pos);
     delay(10);
@@ -462,4 +472,5 @@ void flush() {
     myservo.write(pos);
     delay(10);
   }
+  myservo.detach();
 }
