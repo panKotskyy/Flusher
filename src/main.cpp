@@ -41,13 +41,15 @@ const char *password = "bohdan1010";
 #define BOTtoken "5933476596:AAG-mZ1tfNy0boHKzrOdjFmFLCckUIfEClc"
 #define CHAT_ID "-948044538"
 
+int pos = 15;
+
 RTC_DATA_ATTR int bootCount = 0;
 RTC_DATA_ATTR int interruptBootCount = 0;
-RTC_DATA_ATTR bool deepSleepMode = true;
+RTC_DATA_ATTR bool deepSleepMode = false;
 RTC_DATA_ATTR bool sendData = true;
-RTC_DATA_ATTR bool debug = true;
+RTC_DATA_ATTR bool debug = false;
 RTC_DATA_ATTR bool enableManual = false;
-RTC_DATA_ATTR bool enableAuto = true;
+RTC_DATA_ATTR bool enableAuto = false;
 
 unsigned long now;
 unsigned long previousSensorReading = 0;
@@ -78,21 +80,251 @@ const char index_html[] PROGMEM = R"rawliteral(
     <style>
         body {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
+            justify-content: center;
             height: 100vh;
             margin: 0;
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f0f0;
+            color: #333;
         }
         button {
             font-size: 1.5em;
             padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        p {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        .slider {
+            width: 300px;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 10px;
+            border-radius: 5px;
+            background: #d3d3d3;
+            outline: none;
+            opacity: 0.7;
+            -webkit-transition: .2s;
+            transition: opacity .2s;
+        }
+        .slider:hover {
+            opacity: 1;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+        #detachButton {
+            font-size: 1.2em;
+            padding: 10px 20px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        #detachButton:hover {
+            background-color: #d32f2f;
         }
     </style>
 </head>
 <body>
     <button onclick="sendPostRequest()">Flush!</button>
+    
+    <p>Position: <span id="servoPos"></span></p>
+    <input type="range" min="15" max="150" value="15" class="slider" id="servoSlider" onchange="servo(this.value)"/>
+  
+    <button id="detachButton" onclick="detachServo()">Detach Servo</button>
 
+    <button onclick="renderGraph()">Render Graph</button>
+
+    <canvas id="myChart" width="400" height="200"></canvas>
+
+    // <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@^3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@^2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@^1"></script>
     <script>
+        var timeout = null;
+        var slider = document.getElementById("servoSlider");
+        var servoP = document.getElementById("servoPos");
+        servoP.innerHTML = slider.value;
+        slider.oninput = function() {
+            slider.value = this.value;
+            servoP.innerHTML = this.value;
+        }
+
+        // Function to fetch data from InfluxDB
+        async function fetchData() {
+            const response = await fetch('https://us-east-1-1.aws.cloud2.influxdata.com/api/v2/query', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Token OrddY9ea5LGv5bpZNEdnYrBBn7-4nwL1zrZI_5W-XVYghPNeIbh6a7J-1uNnfzaQsk7E78JHdX7l6ypsZNrXBg==',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    "query": "from(bucket:\"Flusher\") |> range(start: -1d) |> filter(fn: (r) => r._measurement == \"measurements\" and r._field == \"distance\") |> keep(columns: [\"_time\", \"_value\"])"
+                })
+            });
+            console.log(response);
+            const data = await response.text();
+            console.log("response", data);
+            return data;
+        }
+
+        // Function to format data for Chart.js
+        function formatData(influxData) {
+            const NUM_POINTS = 24 * 60 * 60;
+            const now = Math.round(Date.now() / 1000) * 1000;
+            const start = now - NUM_POINTS * 1000;
+
+            const lines = influxData.split('\r\n').slice(1); // Split lines and remove the header
+            console.log("lines", lines);
+            const tm = Date.parse(lines[0].slice(11).split(',')[0]);
+            console.log(now, start, tm, now - tm, start - tm, NUM_POINTS);
+
+            const timestamps = [];
+            const distances = [];
+
+            const pointData = [];
+
+            // let k = 0;
+            // for (let i = 0; i < NUM_POINTS - 1; i++) {
+            //     let timestamp = start + i * 1000;
+            //     let distance = 55;
+
+            //     if (k < lines.length) {
+            //         const [db_timestamp, db_distance] = lines[k].slice(11).split(',');
+
+            //         if (timestamp == Math.round(Date.parse(db_timestamp) / 1000) * 1000) {
+            //             distance = parseFloat(db_distance);
+            //             k++;
+            //             console.log(timestamp);
+            //         }
+            //     }
+
+            //     // console.log(timestamps.length);
+
+            //     timestamps.push(timestamp);
+            //     distances.push(distance);
+
+            //     pointData.push({x: timestamp, y: distance});
+            // }
+
+            pointData.push({x: start, y: 55});
+
+            lines.forEach((line) => {
+              const [db_timestamp, db_distance] = line.slice(11).split(',');
+              pointData.push({x: Date.parse(db_timestamp), y: parseFloat(db_distance)});
+            });
+
+            return pointData;
+        }
+
+        // Function to create and render the graph
+        async function renderGraph() {
+            const influxData = await fetchData();
+            const pointData = formatData(influxData);
+
+            console.log("pointData", pointData);
+
+            const decimation = {
+                enabled: false,
+                // algorithm: 'min-max',
+            };
+
+            const data = {
+                datasets: [{
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1,
+                    data: pointData,
+                    label: 'Large Dataset',
+                    radius: 0,
+                }]
+            };
+
+            const config = {
+                type: 'line',
+                data: data,
+                options: {
+                    // Turn off animations and data parsing for performance
+                    animation: false,
+                    parsing: false,
+
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
+                    plugins: {
+                        decimation: decimation,
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            ticks: {
+                                source: 'auto',
+                                // Disabled rotation for performance
+                                maxRotation: 0,
+                                autoSkip: true,
+                            }
+                        }
+                    }
+                }
+            };
+
+            const ctx = document.getElementById('myChart').getContext('2d');
+            const myChart = new Chart(ctx, config);
+        }
+
+        // Call the renderGraph function
+        // renderGraph();
+
+        function servo(pos) {
+            clearTimeout(timeout);
+            timeout = setTimeout(function() {
+                fetch('/set?position=' + pos, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                });
+            }, 500);
+        }
+
+        function detachServo() {
+            fetch('/set?servo=0', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+            });
+        }
+
         function sendPostRequest() {
             fetch('/', {
                 method: 'POST',
@@ -139,6 +371,7 @@ void flush();
 void handleTelegram();
 void handleNewMessages(int numNewMessages);
 void storeData();
+void setPosition(int newPos);
 
 // Function that gets current epoch time
 unsigned long getTime() {
@@ -200,7 +433,7 @@ void setup() {
 
 void loop() {
   now = getTime();
-  if (now - previousSensorReading > SENSOR_READING_INTERVAL) {
+  if (now - previousSensorReading >= SENSOR_READING_INTERVAL) {
     readSound();
     readDistance();
     previousSensorReading = now;
@@ -235,7 +468,7 @@ void loop() {
 
   if (deepSleepMode && digitalRead(PIR_PIN) == LOW) {
     Serial.println("Going to sleep now");
-    delay(1000);
+    // delay(1000);
     // bot.sendMessage(CHAT_ID, "Going to deep sleep...");
     if (debug || movementDetected) {
       esp_sleep_enable_timer_wakeup(180000000); // 3 min
@@ -254,6 +487,21 @@ void initBot() {
 void initWebServer() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/html", index_html);
+  });
+
+  server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("position")) {
+      int newPos = request->getParam("position")->value().toInt();
+      setPosition(newPos);
+    }
+    if (request->hasParam("servo")) {
+      int state = request->getParam("servo")->value().toInt();
+      if (state && !myservo.attached()) {
+        myservo.attach(SERVO_PIN);
+      } else {
+        myservo.detach();
+      }
+    }
   });
 
   server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -420,7 +668,7 @@ void handleNewMessages(int numNewMessages) {
     }
     if (text == "/auto") {
       enableAuto = !enableAuto;
-      bot.sendMessage(CHAT_ID, enableAuto ? "Auto Flush is ON" : "Manual Flush is OFF");
+      bot.sendMessage(CHAT_ID, enableAuto ? "Auto Flush is ON" : "Auto Flush is OFF");
     }
     if (text == "/sendData") {
       sendData = !sendData;
@@ -431,7 +679,7 @@ void handleNewMessages(int numNewMessages) {
       bot.sendMessage(CHAT_ID, deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
     }
     if (text == "/stat") {
-      String response = "IP: http://" + String(WiFi.localIP())
+      String response = "IP: " + WiFi.localIP().toString()
       + "\nBoot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")"
       + "\nDebug: " + (debug ? "ON" : "OFF")
       + "\nDeep Sleep: " + (deepSleepMode ? "ON" : "OFF")
@@ -467,10 +715,27 @@ void flush() {
     myservo.write(pos);
     delay(10);
   }
-  delay(4000);
+  delay(5000);
   for (int pos = 150; pos >= 15; pos -= 5) {
     myservo.write(pos);
     delay(10);
   }
   myservo.detach();
+}
+
+void setPosition(int newPos) {
+  if (!myservo.attached()) {
+    myservo.attach(SERVO_PIN);
+  }
+  if (newPos > pos) {
+    for (;pos<=newPos; pos++) {
+      myservo.write(pos);
+      delay(2);
+    }
+  } else {
+    for (;pos>=newPos;pos--) {
+      myservo.write(pos);
+      delay(2);
+    }
+  }
 }
