@@ -156,7 +156,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <button onclick="sendPostRequest()">Flush!</button>
     
     <p>Position: <span id="servoPos"></span></p>
-    <input type="range" min="15" max="150" value="15" class="slider" id="servoSlider" onchange="servo(this.value)"/>
+    <input type="range" min="0" max="75" value="0" class="slider" id="servoSlider" onchange="servo(this.value)"/>
   
     <button id="detachButton" onclick="detachServo()">Detach Servo</button>
 
@@ -385,6 +385,24 @@ unsigned long getTime() {
   return now;
 }
 
+bool isTimeBetweenMidnightAndNine(unsigned long epochTime) {
+  // Get the current time struct
+  struct tm *timeinfo;
+  timeinfo = localtime((time_t*)&epochTime);
+  
+  // Extract hour and minute from time struct
+  int hour = timeinfo->tm_hour;
+  int minute = timeinfo->tm_min;
+  
+  // Check if the time falls between 24:00 and 9:00
+  if ((hour >= 0 && hour < 9) || (hour == 9 && minute == 0)) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+
 String getTimeFormatted(unsigned long &ts) {
   struct tm timeinfo;
   time_t timestamp = ts;
@@ -455,9 +473,13 @@ void loop() {
     movementDetected = true;
   }
 
-  if (enableAuto && digitalRead(PIR_PIN) == LOW && defaultDistance - distance < 1 && movementDetected && now - previousMovement > AUTO_FLUSH_DELAY) {
-    bot.sendMessage(CHAT_ID, "Auto Flush");
-    newRequest = true;
+  if (digitalRead(PIR_PIN) == LOW && defaultDistance - distance < 1 && movementDetected && now - previousMovement > AUTO_FLUSH_DELAY) {
+    if (enableAuto || isTimeBetweenMidnightAndNine(now)) {
+      bot.sendMessage(CHAT_ID, "Auto Flush");
+      newRequest = true;
+    } else {
+      movementDetected = false;
+    }
   }
 
   if (newRequest) {
@@ -694,7 +716,9 @@ void handleNewMessages(int numNewMessages) {
       + "\n\nDistance: " + String(distance, 1)
       + "\nDefault Distance: " + String(defaultDistance, 1)
       + "\nMax Distance: " + String(maxDistance, 1)
-      + "\nMin Distance: " + String(minDistance, 1);
+      + "\nMin Distance: " + String(minDistance, 1)
+      
+      + "\nServo position: " + String(myservo.read());
 
       // + "\n\nDigital Sound: " + (digitalSound ? "HIGH" : "LOW")
       // + "\nAnalog Sound: " + String(analogSound)
@@ -711,15 +735,16 @@ void flush() {
   if (!myservo.attached()) {
     myservo.attach(SERVO_PIN);
   }
-  for (int pos = 15; pos <= 150; pos += 5) {
+  for (int pos = 0; pos <= 75; pos += 25) {
     myservo.write(pos);
-    delay(10);
+    delay(100);
   }
   delay(5000);
-  for (int pos = 150; pos >= 15; pos -= 5) {
+  for (int pos = 75; pos >= 0; pos -= 15) {
     myservo.write(pos);
-    delay(10);
+    delay(55);
   }
+  delay(500);
   myservo.detach();
 }
 
