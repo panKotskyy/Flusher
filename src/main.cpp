@@ -12,8 +12,6 @@
 
 // Define PINS
 #define SERVO_PIN 13
-#define SOUND_DIGITAL_PIN 35 // yellow
-#define SOUND_ANALOG_PIN 32  // green
 #define TRIG_PIN 14          // blue
 #define ECHO_PIN 27          // purple
 #define PIR_PIN 34           // white
@@ -23,7 +21,6 @@
 
 // Config
 #define DEEP_SLEEP_INTERVAL 3
-#define SOUND_THRESHOLD 0
 #define SENSOR_READING_INTERVAL 1
 #define AUTO_FLUSH_DELAY 150
 
@@ -37,12 +34,12 @@ const char *password = "bohdan1010";
 #define INFLUXDB_BUCKET "Flusher"
   
 // Time zone info
-#define TZ_INFO "UTC2"
+#define TZ_INFO "UTC-2"
 
 #define BOTtoken "5933476596:AAG-mZ1tfNy0boHKzrOdjFmFLCckUIfEClc"
 #define CHAT_ID "-948044538"
 
-int pos = 15;
+int pos = 0;
 
 RTC_DATA_ATTR int bootCount = 0;
 RTC_DATA_ATTR int interruptBootCount = 0;
@@ -51,20 +48,15 @@ RTC_DATA_ATTR bool sendData = true;
 RTC_DATA_ATTR bool debug = false;
 RTC_DATA_ATTR bool enableManual = false;
 RTC_DATA_ATTR bool enableAuto = false;
+RTC_DATA_ATTR float defaultDistance;
 
 unsigned long now;
 unsigned long previousSensorReading = 0;
 
-RTC_DATA_ATTR float defaultDistance;
 RTC_DATA_ATTR bool movementDetected;
 RTC_DATA_ATTR unsigned long previousMovement;
 
 float distance;
-int digitalSound;
-int analogSound;
-
-int minAnalogSound = 99999;
-int maxAnalogSound;
 RTC_DATA_ATTR float minDistance = 99999;
 RTC_DATA_ATTR float maxDistance;
 
@@ -78,15 +70,8 @@ UniversalTelegramBot bot(BOTtoken, client);
 InfluxDBClient dbClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 Point measurments("measurements");
 
-void initBot();
 void initWebServer();
-void initServo();
-void initSoundDetector();
-void initDistanceReader();
-void initPir();
 void printWakeupReason();
-
-void readSound();
 void readDistance();
 void flush();
 void handleTelegram();
@@ -116,7 +101,7 @@ bool isTimeBetweenMidnightAndNine(unsigned long epochTime) {
   int minute = timeinfo->tm_min;
   
   // Check if the time falls between 24:00 and 9:00
-  if ((hour >= 0 && hour < 9) || (hour == 9 && minute == 0)) {
+  if ((hour >= 0 && hour < 6) || (hour == 6 && minute == 30)) {
     return true;
   } else {
     return false;
@@ -149,12 +134,12 @@ void setup() {
 
   wifiManager.connect();
   initWebServer();
-  initServo();
-  initBot();
-  initSoundDetector();
-  initDistanceReader();
-  initPir();
-
+  client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(PIR_PIN, INPUT);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
+  
   if (!defaultDistance) {
     readDistance();
     defaultDistance = distance;
@@ -178,7 +163,6 @@ void setup() {
 void loop() {
   now = getTime();
   if (now - previousSensorReading >= SENSOR_READING_INTERVAL) {
-    readSound();
     readDistance();
     previousSensorReading = now;
     if (sendData && distance > 0 && distance < 100) {
@@ -227,10 +211,6 @@ void loop() {
   }
 }
 
-void initBot() {
-    client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
-}
-
 // Initialize WebServer
 void initWebServer() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -255,35 +235,14 @@ void initWebServer() {
   server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     if (request->url() == "/") {
       String body(reinterpret_cast<char *>(data), len);
-
       Serial.printf("Received body: %s", body);
-
       newRequest = true;
-
       request->send(LittleFS, "/index.html");
     }
   });
 
   ElegantOTA.begin(&server);
   server.begin();
-}
-
-void initServo() {
-  myservo.attach(SERVO_PIN);
-}
-
-void initSoundDetector() {
-  pinMode(SOUND_DIGITAL_PIN, INPUT);
-}
-
-void initDistanceReader() {
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-}
-
-void initPir() {
-  pinMode(PIR_PIN, INPUT);
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, HIGH);
 }
 
 void printWakeupReason() {
@@ -308,20 +267,6 @@ void printWakeupReason() {
     default:
       Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeupReason);
       break;
-  }
-}
-
-void readSound() {
-  digitalSound = digitalRead(SOUND_DIGITAL_PIN);
-  analogSound = analogRead(SOUND_ANALOG_PIN);
-
-  minAnalogSound = analogSound > 0 && analogSound < minAnalogSound ? analogSound : minAnalogSound;
-  maxAnalogSound = analogSound > maxAnalogSound ? analogSound : maxAnalogSound;
-
-  if (analogSound > SOUND_THRESHOLD) {
-    Serial.print(analogSound);
-    Serial.print("\t");
-    Serial.println(digitalSound);
   }
 }
 
@@ -358,8 +303,6 @@ void storeData() {
     measurments.addField("interruptBootCount", interruptBootCount);
     measurments.addField("movement", digitalRead(PIR_PIN));
     measurments.addField("distance", distance);
-    measurments.addField("digitalSound", digitalSound);
-    measurments.addField("analogSound", analogSound);
 
     Serial.print("Writing: ");
     Serial.println(dbClient.pointToLineProtocol(measurments));
@@ -446,11 +389,6 @@ void handleNewMessages(int numNewMessages) {
       
       + "\nServo position: " + String(myservo.read());
 
-      // + "\n\nDigital Sound: " + (digitalSound ? "HIGH" : "LOW")
-      // + "\nAnalog Sound: " + String(analogSound)
-      // + "\nMax Analog Sound: " + String(maxAnalogSound)
-      // + "\nMin Analog Sound: " + String(minAnalogSound);
-
       bot.sendMessage(chat_id, response, "");
     }
   }
@@ -461,16 +399,19 @@ void flush() {
   if (!myservo.attached()) {
     myservo.attach(SERVO_PIN);
   }
-  for (int pos = 0; pos <= 75; pos += 25) {
+  for (int pos = 0; pos <= 75; pos += 5) {
     myservo.write(pos);
-    delay(100);
+    delay(50);
   }
-  delay(5000);
-  for (int pos = 75; pos >= 0; pos -= 15) {
+  delay(6000);
+  for (int pos = 75; pos >= 0; pos -= 5) {
     myservo.write(pos);
-    delay(55);
+    delay(50);
   }
-  delay(500);
+  myservo.write(10);
+  delay(200);
+  myservo.write(0);
+  delay(300);
   myservo.detach();
 }
 
