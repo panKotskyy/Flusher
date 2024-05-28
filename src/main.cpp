@@ -15,6 +15,7 @@
 #define TRIG_PIN 14          // blue
 #define ECHO_PIN 27          // purple
 #define PIR_PIN 34           // white
+#define FORCE_SENSOR_PIN 33
 
 // Define sound speed in cm/uS
 #define SOUND_SPEED 0.034
@@ -22,6 +23,7 @@
 // Config
 #define DEEP_SLEEP_INTERVAL 3
 #define SENSOR_READING_INTERVAL 1
+#define FORCE_SENSOR_SENDING_INTERVAL 3
 #define AUTO_FLUSH_DELAY 150
 
 // Define network credentials
@@ -52,11 +54,14 @@ RTC_DATA_ATTR float defaultDistance;
 
 unsigned long now;
 unsigned long previousSensorReading = 0;
+unsigned long previousForceSensorSend = 0;
 
 RTC_DATA_ATTR bool movementDetected;
 RTC_DATA_ATTR unsigned long previousMovement;
 
 float distance;
+int force;
+int forceDigital;
 RTC_DATA_ATTR float minDistance = 99999;
 RTC_DATA_ATTR float maxDistance;
 
@@ -164,6 +169,8 @@ void loop() {
   now = getTime();
   if (now - previousSensorReading >= SENSOR_READING_INTERVAL) {
     readDistance();
+    force = analogRead(FORCE_SENSOR_PIN);
+    forceDigital = digitalRead(FORCE_SENSOR_PIN);
     previousSensorReading = now;
     if (sendData && distance > 0 && distance < 100) {
       storeData();
@@ -171,6 +178,11 @@ void loop() {
   }
 
   handleTelegram();
+
+  if (force > 300 && now - previousForceSensorSend >= FORCE_SENSOR_SENDING_INTERVAL) {
+    bot.sendMessage(CHAT_ID, "Force DETECTED (" + String(force) + ", " + String(forceDigital) + ")");
+    previousForceSensorSend = now;
+  }
 
   if (enableManual && distance < 8 && distance > 0) {
     bot.sendMessage(CHAT_ID, "Manual Flush");
@@ -303,6 +315,7 @@ void storeData() {
     measurments.addField("interruptBootCount", interruptBootCount);
     measurments.addField("movement", digitalRead(PIR_PIN));
     measurments.addField("distance", distance);
+    measurments.addField("force", force);
 
     Serial.print("Writing: ");
     Serial.println(dbClient.pointToLineProtocol(measurments));
