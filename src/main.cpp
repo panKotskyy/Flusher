@@ -20,36 +20,39 @@
 // Define sound speed in cm/uS
 #define SOUND_SPEED 0.034
 
-// Config
-#define DEEP_SLEEP_INTERVAL 3
-#define SENSOR_READING_INTERVAL 1
-#define FORCE_SENSOR_SENDING_INTERVAL 3
-#define AUTO_FLUSH_DELAY 150
-
 // Define network credentials
 const char *ssid = "ASUS_60";
 const char *password = "bohdan1010";
 
+// Define DB credentials
 #define INFLUXDB_URL "https://us-east-1-1.aws.cloud2.influxdata.com"
 #define INFLUXDB_TOKEN "OrddY9ea5LGv5bpZNEdnYrBBn7-4nwL1zrZI_5W-XVYghPNeIbh6a7J-1uNnfzaQsk7E78JHdX7l6ypsZNrXBg=="
 #define INFLUXDB_ORG "d977e787a53d425a"
 #define INFLUXDB_BUCKET "Flusher"
   
-// Time zone info
-#define TZ_INFO "UTC-2"
+// Define time zone info
+#define TZ_INFO "EET-2EEST,M3.5.0/3,M10.5.0/4"
 
+// Define telegram bot
 #define BOTtoken "5933476596:AAG-mZ1tfNy0boHKzrOdjFmFLCckUIfEClc"
 #define CHAT_ID "-948044538"
 
-int pos = 0;
+struct Config {
+  int deepSleepInterval;
+  int sensorReadingInterval;
+  int forceSensorSendingInterval;
+  int autoFlushDelay;
+  bool deepSleepMode;
+  bool sendData;
+  bool debug;
+  bool enableManual;
+  bool enableAuto;
+  int autoFlushStartTime;
+  int autoFlushStopTime;
+};
 
 RTC_DATA_ATTR int bootCount = 0;
 RTC_DATA_ATTR int interruptBootCount = 0;
-RTC_DATA_ATTR bool deepSleepMode = false;
-RTC_DATA_ATTR bool sendData = true;
-RTC_DATA_ATTR bool debug = false;
-RTC_DATA_ATTR bool enableManual = false;
-RTC_DATA_ATTR bool enableAuto = false;
 RTC_DATA_ATTR float defaultDistance;
 
 unsigned long now;
@@ -62,11 +65,11 @@ RTC_DATA_ATTR unsigned long previousMovement;
 float distance;
 int force;
 int forceDigital;
-RTC_DATA_ATTR float minDistance = 99999;
-RTC_DATA_ATTR float maxDistance;
+int pos = 0;
 
 bool newRequest = false;
 
+Config config;
 WiFiManager wifiManager(ssid, password);
 AsyncWebServer server(80);
 Servo myservo;
@@ -96,32 +99,95 @@ unsigned long getTime() {
   return now;
 }
 
-bool isTimeBetweenMidnightAndNine(unsigned long epochTime) {
+bool isTimeInRange(unsigned long epochTime) {
   // Get the current time struct
   struct tm *timeinfo;
   timeinfo = localtime((time_t*)&epochTime);
   
-  // Extract hour and minute from time struct
-  int hour = timeinfo->tm_hour;
-  int minute = timeinfo->tm_min;
-  
-  // Check if the time falls between 24:00 and 9:00
-  if ((hour >= 0 && hour < 6) || (hour == 6 && minute == 30)) {
-    return true;
+  int currentMinutes = timeinfo->tm_hour * 60 + timeinfo->tm_min;
+  if (config.autoFlushStartTime > config.autoFlushStopTime) {
+    return currentMinutes > config.autoFlushStartTime || currentMinutes < config.autoFlushStopTime;
   } else {
-    return false;
+    return currentMinutes > config.autoFlushStartTime && currentMinutes < config.autoFlushStopTime;
   }
 }
-
 
 String getTimeFormatted(unsigned long &ts) {
   struct tm timeinfo;
   time_t timestamp = ts;
-  gmtime_r(&timestamp, &timeinfo);
+  localtime_r(&timestamp, &timeinfo);
   char formattedTime[9];
   strftime(formattedTime, sizeof(formattedTime), "%H:%M:%S", &timeinfo);
 
   return String(formattedTime);
+}
+
+bool loadConfig() {
+  if (!LittleFS.begin()) {
+    Serial.println("Failed to mount LittleFS");
+    return false;
+  }
+
+  File file = LittleFS.open("/config.json", "r");
+  if (!file) {
+    Serial.println("Failed to open config file");
+    return false;
+  }
+
+  size_t size = file.size();
+  if (size > 1024) {
+    Serial.println("Config file size is too large");
+    return false;
+  }
+
+  std::unique_ptr<char[]> buf(new char[size]);
+  file.readBytes(buf.get(), size);
+
+  DynamicJsonDocument doc(1024);
+  auto error = deserializeJson(doc, buf.get());
+  if (error) {
+    Serial.println("Failed to parse config file");
+    return false;
+  }
+
+  config.deepSleepInterval = doc["deepSleepInterval"];
+  config.sensorReadingInterval = doc["sensorReadingInterval"];
+  config.forceSensorSendingInterval = doc["forceSensorSendingInterval"];
+  config.autoFlushDelay = doc["autoFlushDelay"];
+  config.deepSleepMode = doc["deepSleepMode"];
+  config.sendData = doc["sendData"];
+  config.debug = doc["debug"];
+  config.enableManual = doc["enableManual"];
+  config.enableAuto = doc["enableAuto"];
+  config.autoFlushStartTime = doc["autoFlushStartTime"];
+  config.autoFlushStopTime = doc["autoFlushStopTime"];
+
+  return true;
+}
+
+bool saveConfig() {
+  DynamicJsonDocument doc(1024);
+
+  doc["deepSleepInterval"] = config.deepSleepInterval;
+  doc["sensorReadingInterval"] = config.sensorReadingInterval;
+  doc["forceSensorSendingInterval"] = config.forceSensorSendingInterval;
+  doc["autoFlushDelay"] = config.autoFlushDelay;
+  doc["deepSleepMode"] = config.deepSleepMode;
+  doc["sendData"] = config.sendData;
+  doc["debug"] = config.debug;
+  doc["enableManual"] = config.enableManual;
+  doc["enableAuto"] = config.enableAuto;
+  doc["autoFlushStartTime"] = config.autoFlushStartTime;
+  doc["autoFlushStopTime"] = config.autoFlushStopTime;
+
+  File file = LittleFS.open("/config.json", "w");
+  if (!file) {
+    Serial.println("Failed to open config file for writing");
+    return false;
+  }
+
+  serializeJson(doc, file);
+  return true;
 }
 
 void setup() {
@@ -135,6 +201,23 @@ void setup() {
   if(!LittleFS.begin()){
     Serial.println("An Error has occurred while mounting LittleFS");
     return;
+  }
+
+    if (!loadConfig()) {
+    Serial.println("Failed to load config");
+    // Set default values if config loading fails
+    config.deepSleepInterval = 3;
+    config.sensorReadingInterval = 1;
+    config.forceSensorSendingInterval = 3;
+    config.autoFlushDelay = 40;
+    config.deepSleepMode = false;
+    config.sendData = true;
+    config.debug = false;
+    config.enableManual = false;
+    config.enableAuto = false;
+    config.autoFlushStartTime = 0; // midnight
+    config.autoFlushStopTime = 420; // 7AM
+    saveConfig();
   }
 
   wifiManager.connect();
@@ -153,6 +236,8 @@ void setup() {
   }
 
   timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
+  delay(1000);
+  // configTzTime(TZ_INFO, "0.ua.pool.ntp.org");
 
   if (dbClient.validateConnection()) {
     Serial.print("Connected to InfluxDB: ");
@@ -167,24 +252,24 @@ void setup() {
 
 void loop() {
   now = getTime();
-  if (now - previousSensorReading >= SENSOR_READING_INTERVAL) {
+  if (now - previousSensorReading >= config.sensorReadingInterval) {
     readDistance();
     force = analogRead(FORCE_SENSOR_PIN);
     forceDigital = digitalRead(FORCE_SENSOR_PIN);
     previousSensorReading = now;
-    if (sendData && distance > 0 && distance < 100) {
+    if (config.sendData && distance > 0 && distance < defaultDistance) {
       storeData();
     }
   }
 
   handleTelegram();
 
-  if (force > 300 && now - previousForceSensorSend >= FORCE_SENSOR_SENDING_INTERVAL) {
+  if (force > 300 && now - previousForceSensorSend >= config.forceSensorSendingInterval) {
     bot.sendMessage(CHAT_ID, "Force DETECTED (" + String(force) + ", " + String(forceDigital) + ")");
     previousForceSensorSend = now;
   }
 
-  if (enableManual && distance < 8 && distance > 0) {
+  if (config.enableManual && distance < 8 && distance > 0) {
     bot.sendMessage(CHAT_ID, "Manual Flush");
     newRequest = true;
   } else if (defaultDistance - distance > 5 && distance > 0) {
@@ -195,8 +280,8 @@ void loop() {
     movementDetected = true;
   }
 
-  if (digitalRead(PIR_PIN) == LOW && defaultDistance - distance < 1 && movementDetected && now - previousMovement > AUTO_FLUSH_DELAY) {
-    if (enableAuto || isTimeBetweenMidnightAndNine(now)) {
+  if (digitalRead(PIR_PIN) == LOW && defaultDistance - distance < 1 && movementDetected && now - previousMovement > config.autoFlushDelay) {
+    if (config.enableAuto && isTimeInRange(now)) {
       bot.sendMessage(CHAT_ID, "Auto Flush");
       newRequest = true;
     } else {
@@ -210,11 +295,11 @@ void loop() {
     newRequest = false;
   }
 
-  if (deepSleepMode && digitalRead(PIR_PIN) == LOW) {
+  if (config.deepSleepMode && digitalRead(PIR_PIN) == LOW) {
     Serial.println("Going to sleep now");
     // delay(1000);
     // bot.sendMessage(CHAT_ID, "Going to deep sleep...");
-    if (debug || movementDetected) {
+    if (config.debug || movementDetected) {
       esp_sleep_enable_timer_wakeup(180000000); // 3 min
     } else {
       esp_sleep_enable_timer_wakeup(3600000000); // 60 min
@@ -223,24 +308,105 @@ void loop() {
   }
 }
 
+void handleSettingsRequest(AsyncWebServerRequest *request) {
+  // Create a JSON document
+  StaticJsonDocument<512> jsonDoc;
+
+  // Populate the JSON document with the configuration settings
+  jsonDoc["deepSleepInterval"] = config.deepSleepInterval;
+  jsonDoc["sensorReadingInterval"] = config.sensorReadingInterval;
+  jsonDoc["forceSensorSendInterval"] = config.forceSensorSendingInterval;
+  jsonDoc["autoFlushDelay"] = config.autoFlushDelay;
+  jsonDoc["deepSleepMode"] = config.deepSleepMode;
+  jsonDoc["sendData"] = config.sendData;
+  jsonDoc["debug"] = config.debug;
+  jsonDoc["enableManual"] = config.enableManual;
+  jsonDoc["enableAuto"] = config.enableAuto;
+  jsonDoc["autoFlushStartTime"] = config.autoFlushStartTime;
+  jsonDoc["autoFlushStopTime"] = config.autoFlushStopTime;
+
+  // Convert the JSON document to a string
+  String jsonString;
+  serializeJson(jsonDoc, jsonString);
+
+  // Send the JSON string as a response
+  request->send(200, "application/json", jsonString);
+}
+
+String minutesToHHMM(int minutes) {
+    int hours = minutes / 60;
+    int remainingMinutes = minutes % 60;
+    char formattedTime[6]; // "HHLMM" + '\0'
+    sprintf(formattedTime, "%02d:%02d", hours, remainingMinutes);
+    return String(formattedTime);
+}
+
 // Initialize WebServer
 void initWebServer() {
+  // Route to load index.html file
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(LittleFS, "/index.html");
   });
+
+  // Route to load styles.css file
+  server.on("/styles.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/styles.css", "text/css");
+  });
+
+  // Route to load script.js file
+  server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/script.js", "text/javascript");
+  });
+
+  // Serve the settings as JSON
+  server.on("/settings", HTTP_GET, handleSettingsRequest);
 
   server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (request->hasParam("position")) {
       int newPos = request->getParam("position")->value().toInt();
       setPosition(newPos);
-    }
-    if (request->hasParam("servo")) {
+    } else if (request->hasParam("servo")) {
       int state = request->getParam("servo")->value().toInt();
       if (state && !myservo.attached()) {
         myservo.attach(SERVO_PIN);
       } else {
         myservo.detach();
       }
+    } else {
+      if (request->hasParam("deepSleepInterval")) {
+        config.deepSleepInterval = request->getParam("deepSleepInterval")->value().toInt();
+      }
+      if (request->hasParam("sensorReadingInterval")) {
+        config.sensorReadingInterval = request->getParam("sensorReadingInterval")->value().toInt();
+      }
+      if (request->hasParam("forceSensorSendingInterval")) {
+       config.forceSensorSendingInterval = request->getParam("forceSensorSendingInterval")->value().toInt();
+      }
+    if (request->hasParam("autoFlushDelay")) {
+      config.autoFlushDelay = request->getParam("autoFlushDelay")->value().toInt();
+    }
+    if (request->hasParam("deepSleepMode")) {
+      config.deepSleepMode = request->getParam("deepSleepMode")->value().equalsIgnoreCase("true");
+    }
+    if (request->hasParam("sendData")) {
+      config.sendData = request->getParam("sendData")->value().equalsIgnoreCase("true");
+    }
+    if (request->hasParam("debug")) {
+      config.debug = request->getParam("debug")->value().equalsIgnoreCase("true");
+    }
+    if (request->hasParam("enableManual")) {
+      config.enableManual = request->getParam("enableManual")->value().equalsIgnoreCase("true");
+    }
+    if (request->hasParam("enableAuto")) {
+      config.enableAuto = request->getParam("enableAuto")->value().equalsIgnoreCase("true");
+    }
+    if (request->hasParam("autoFlushStartTime")) {
+      config.autoFlushStartTime = request->getParam("autoFlushStartTime")->value().toInt();
+    }
+    if (request->hasParam("autoFlushStopTime")) {
+      config.autoFlushStopTime = request->getParam("autoFlushStopTime")->value().toInt();
+    }
+    saveConfig();
     }
   });
 
@@ -291,9 +457,6 @@ void readDistance() {
   long duration = pulseIn(ECHO_PIN, HIGH);
 
   distance = duration * SOUND_SPEED / 2;
-
-  minDistance = distance > 0 && distance < minDistance ? distance : minDistance;
-  maxDistance = distance > maxDistance ? distance : maxDistance;
 
   Serial.print("Distance (cm): ");
   Serial.println(distance);
@@ -363,44 +526,44 @@ void handleNewMessages(int numNewMessages) {
       bot.sendMessage(chat_id, "Flushing canceled");
     }
     if (text == "/debug") {
-      debug = !debug;
-      bot.sendMessage(CHAT_ID, debug ? "Debug is ON" : "Debug is OFF");
+      config.debug = !config.debug;
+      bot.sendMessage(CHAT_ID, config.debug ? "Debug is ON" : "Debug is OFF");
     }
     if (text == "/manual") {
-      enableManual = !enableManual;
-      bot.sendMessage(CHAT_ID, enableManual ? "Manual Flush is ON" : "Manual Flush is OFF");
+      config.enableManual = !config.enableManual;
+      bot.sendMessage(CHAT_ID, config.enableManual ? "Manual Flush is ON" : "Manual Flush is OFF");
     }
     if (text == "/auto") {
-      enableAuto = !enableAuto;
-      bot.sendMessage(CHAT_ID, enableAuto ? "Auto Flush is ON" : "Auto Flush is OFF");
+      config.enableAuto = !config.enableAuto;
+      bot.sendMessage(CHAT_ID, config.enableAuto ? "Auto Flush is ON" : "Auto Flush is OFF");
     }
     if (text == "/sendData") {
-      sendData = !sendData;
-      bot.sendMessage(CHAT_ID, sendData ? "Send Data is ON" : "Send Data is OFF");
+      config.sendData = !config.sendData;
+      bot.sendMessage(CHAT_ID, config.sendData ? "Send Data is ON" : "Send Data is OFF");
     }
     if (text == "/deepSleep") {
-      deepSleepMode = !deepSleepMode;
-      bot.sendMessage(CHAT_ID, deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
+      config.deepSleepMode = !config.deepSleepMode;
+      bot.sendMessage(CHAT_ID, config.deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
     }
     if (text == "/stat") {
       String response = "IP: " + WiFi.localIP().toString()
-      + "\nBoot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")"
-      + "\nDebug: " + (debug ? "ON" : "OFF")
-      + "\nDeep Sleep: " + (deepSleepMode ? "ON" : "OFF")
-      + "\nSend Data: " + (sendData ? "ON" : "OFF")
-      + "\nManual Flush: " + (enableManual ? "ON" : "OFF")
-      + "\nAuto Flush: " + (enableAuto ? "ON" : "OFF")
+      + "\nBoot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")\n"
+      + "\nDebug: " + (config.debug ? "ON" : "OFF")
+      + "\nDeep Sleep: " + (config.deepSleepMode ? "ON" : "OFF")
+      + "\nSend Data: " + (config.sendData ? "ON" : "OFF")
+      + "\nManual Flush: " + (config.enableManual ? "ON" : "OFF")
+      + "\nAuto Flush: " + (config.enableAuto ? "ON" : "OFF")
+      + "\nAuto Flush Starts: " + minutesToHHMM(config.autoFlushStartTime)
+      + "\nAuto Flush Ends: " + minutesToHHMM(config.autoFlushStopTime)
+      + "\nNow: " + getTimeFormatted(now) + " (" + String(now) + ")"
+      + "\ninRange: " + (isTimeInRange(now) ? "YES" : "NO")
 
       + "\n\nPIR: " + (digitalRead(PIR_PIN) ? "HIGH" : "LOW")
       + "\nMovement Detected: " + (movementDetected ? "Yes" : "No")
       + "\nMovement Time: " + getTimeFormatted(previousMovement)
 
       + "\n\nDistance: " + String(distance, 1)
-      + "\nDefault Distance: " + String(defaultDistance, 1)
-      + "\nMax Distance: " + String(maxDistance, 1)
-      + "\nMin Distance: " + String(minDistance, 1)
-      
-      + "\nServo position: " + String(myservo.read());
+      + "\nDefault Distance: " + String(defaultDistance, 1);
 
       bot.sendMessage(chat_id, response, "");
     }

@@ -1,0 +1,13 @@
+{
+    "deepSleepInterval": 3,
+    "sensorReadingInterval": 1,
+    "forceSensorSendingInterval": 3,
+    "autoFlushDelay": 40,
+    "deepSleepMode": false,
+    "sendData": true,
+    "debug": false,
+    "enableManual": false,
+    "enableAuto": false,
+    "autoFlushStartTime": 0,
+    "autoFlushStopTime": 420
+}  
