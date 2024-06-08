@@ -7,7 +7,7 @@
     "sendData": true,
     "debug": false,
     "enableManual": false,
-    "enableAuto": false,
-    "autoFlushStartTime": 0,
+    "enableAuto": true,
+    "autoFlushStartTime": 1380,
     "autoFlushStopTime": 420
 }  

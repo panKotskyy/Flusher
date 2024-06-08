@@ -207,3 +207,34 @@ function sendPostRequest() {
             console.error('Error sending POST request:', error);
         });
 }
+
+function showSettings() {
+    document.getElementById('settings-popup').style.display = 'block';
+}
+
+function closeSettings() {
+    document.getElementById('settings-popup').style.display = 'none';
+}
+
+function showGraph() {
+    document.getElementById('graph-popup').style.display = 'block';
+    renderGraph();
+}
+
+function closeGraph() {
+    document.getElementById('graph-popup').style.display = 'none';
+}
+
+document.getElementById('settings-icon').onmouseover = function() {
+    this.src = 'settings-hover.png';
+}
+document.getElementById('settings-icon').onmouseout = function() {
+    this.src = 'settings.png';
+}
+
+document.getElementById('graph-icon').onmouseover = function() {
+    this.src = 'chart-hover.png';
+}
+document.getElementById('graph-icon').onmouseout = function() {
+    this.src = 'chart.png';
+}

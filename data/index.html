@@ -9,56 +9,74 @@
 </head>
 
 <body>
-    <p>LittleFS</p>
-    <button onclick="sendPostRequest()">Flush!</button>
+    <div class="container">
+        <div class="main-buttons">
+            <button class="flush-button" onclick="sendPostRequest()">Flush!</button>
+            <button class="cancel-button" onclick="cancelOperation()">Cancel</button>
+        </div>
 
-    <div class="controls">
-        <h3>Settings</h3>
-        <label>
-            <input type="checkbox" id="deepSleepMode" onchange="updateSetting('deepSleepMode', this.checked)"> Deep Sleep Mode
-        </label>
-        <label>
-            <input type="checkbox" id="sendData" onchange="updateSetting('sendData', this.checked)"> Send Data
-        </label>
-        <label>
-            <input type="checkbox" id="debug" onchange="updateSetting('debug', this.checked)"> Debug
-        </label>
-        <label>
-            <input type="checkbox" id="enableManual" onchange="updateSetting('enableManual', this.checked)"> Enable Manual
-        </label>
-        <label>
-            <input type="checkbox" id="enableAuto" onchange="updateSetting('enableAuto', this.checked)"> Enable Auto
-        </label>
-
-        <label>
-            Deep Sleep Interval: <input type="number" id="deepSleepInterval" onchange="updateSetting('deepSleepInterval', this.value)"> ms
-        </label>
-        <label>
-            Sensor Reading Interval: <input type="number" id="sensorReadingInterval" onchange="updateSetting('sensorReadingInterval', this.value)"> ms
-        </label>
-        <label>
-            Force Sensor Send Interval: <input type="number" id="forceSensorSendInterval" onchange="updateSetting('forceSensorSendInterval', this.value)"> ms
-        </label>
-        <label>
-            Auto Flush Delay: <input type="number" id="autoFlushDelay" onchange="updateSetting('autoFlushDelay', this.value)"> ms
-        </label>
-
-        <label>
-            Auto Flush Start Time: <input type="time" id="autoFlushStartTime" onchange="updateSetting('autoFlushStartTime', timeToMinutes(this.value))">
-        </label>
-        <label>
-            Auto Flush Stop Time: <input type="time" id="autoFlushStopTime" onchange="updateSetting('autoFlushStopTime', timeToMinutes(this.value))">
-        </label>
+        <div class="button-group">
+            <button class="icon-button" onclick="showSettings()">
+                <img src="settings.png" alt="Settings" id="settings-icon">
+            </button>
+            <button class="icon-button" onclick="showGraph()">
+                <img src="chart.png" alt="Graph" id="graph-icon">
+            </button>
+        </div>
     </div>
 
-    <p>Position: <span id="servoPos"></span></p>
-    <input type="range" min="0" max="75" value="0" class="slider" id="servoSlider" onchange="servo(this.value)" />
+    <div id="settings-popup" class="popup">
+        <div class="popup-content">
+            <span class="close" onclick="closeSettings()">&times;</span>
+            <div class="controls">
+                <h3>Settings</h3>
+                <label>
+                    <input type="checkbox" id="deepSleepMode" onchange="updateSetting('deepSleepMode', this.checked)"> Deep Sleep Mode
+                </label>
+                <label>
+                    <input type="checkbox" id="sendData" onchange="updateSetting('sendData', this.checked)"> Send Data
+                </label>
+                <label>
+                    <input type="checkbox" id="debug" onchange="updateSetting('debug', this.checked)"> Debug
+                </label>
+                <label>
+                    <input type="checkbox" id="enableManual" onchange="updateSetting('enableManual', this.checked)"> Enable Manual
+                </label>
+                <label>
+                    <input type="checkbox" id="enableAuto" onchange="updateSetting('enableAuto', this.checked)"> Enable Auto
+                </label>
+                <label>
+                    Deep Sleep Interval: <input type="number" id="deepSleepInterval" onchange="updateSetting('deepSleepInterval', this.value)"> ms
+                </label>
+                <label>
+                    Sensor Reading Interval: <input type="number" id="sensorReadingInterval" onchange="updateSetting('sensorReadingInterval', this.value)"> ms
+                </label>
+                <label>
+                    Force Sending Interval: <input type="number" id="forceSensorSendInterval" onchange="updateSetting('forceSensorSendInterval', this.value)"> ms
+                </label>
+                <label>
+                    Auto Flush Delay: <input type="number" id="autoFlushDelay" onchange="updateSetting('autoFlushDelay', this.value)"> ms
+                </label>
+                <label>
+                    Auto Flush Start Time: <input type="time" id="autoFlushStartTime" onchange="updateSetting('autoFlushStartTime', timeToMinutes(this.value))">
+                </label>
+                <label>
+                    Auto Flush Stop Time: <input type="time" id="autoFlushStopTime" onchange="updateSetting('autoFlushStopTime', timeToMinutes(this.value))">
+                </label>
+            </div>
 
-    <button id="detachButton" onclick="detachServo()">Detach Servo</button>
+            <p>Position: <span id="servoPos"></span></p>
+            <input type="range" min="0" max="75" value="0" class="slider" id="servoSlider" onchange="servo(this.value)" />
+            <button id="detachButton" onclick="detachServo()">Detach Servo</button>
+        </div>
+    </div>
 
-    <button onclick="renderGraph()">Render Graph</button>
-
-    <canvas id="myChart" width="400" height="200"></canvas>
+    <div id="graph-popup" class="popup">
+        <div class="popup-content">
+            <span class="close" onclick="closeGraph()">&times;</span>
+            <canvas id="myChart" width="400" height="200"></canvas>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/moment"></script>

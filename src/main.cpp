@@ -321,7 +321,7 @@ void storeData() {
 
 void handleSensorReading() {
   if (currentTime - previousSensorReading >= config.sensorReadingInterval) {
-    readDistance();
+    distance = readDistance();
     force = analogRead(FORCE_SENSOR_PIN);
     forceDigital = digitalRead(FORCE_SENSOR_PIN);
     previousSensorReading = currentTime;
@@ -457,7 +457,7 @@ void handleTelegramMessages() {
 }
 
 void handleForceDetection() {
-  if (force > 300 && currentTime - previousForceSensorSend >= config.forceSensorSendingInterval) {
+  if (config.debug && force > 300 && currentTime - previousForceSensorSend >= config.forceSensorSendingInterval) {
     bot.sendMessage(CHAT_ID, "Force DETECTED (" + String(force) + ", " + String(forceDigital) + ")");
     previousForceSensorSend = currentTime;
   }
