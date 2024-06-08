@@ -166,3 +166,9 @@ body {
 #detachButton:hover {
     background-color: #d32f2f;
 }
+
+.time-range-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}

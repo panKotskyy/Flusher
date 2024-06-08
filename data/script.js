@@ -10,7 +10,11 @@ slider.oninput = function () {
 document.addEventListener("DOMContentLoaded", function() {
     // Fetch initial values from the backend
     fetchInitialValues();
+    // Initialize time range to last 5 hours, ignoring minutes
+    initializeTimeRange();
 });
+
+let myChart = null; // Store chart instance globally
 
 // Function to fetch initial values from the backend
 async function fetchInitialValues() {
@@ -22,7 +26,6 @@ async function fetchInitialValues() {
     });
 
     const settings = await response.json();
-    console.log('Initial settings:', settings);
 
     // Update UI elements with initial values
     document.getElementById("deepSleepMode").checked = settings.deepSleepMode;
@@ -69,7 +72,7 @@ function minutesToTime(minutes) {
 }
 
 // Function to fetch data from InfluxDB
-async function fetchData() {
+async function fetchData(startTime, endTime) {
     const response = await fetch('https://us-east-1-1.aws.cloud2.influxdata.com/api/v2/query', {
         method: 'POST',
         headers: {
@@ -77,55 +80,39 @@ async function fetchData() {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            "query": "from(bucket:\"Flusher\") |> range(start: -1d) |> filter(fn: (r) => r._measurement == \"measurements\" and r._field == \"distance\") |> keep(columns: [\"_time\", \"_value\"])"
+            "query": `from(bucket:\"Flusher\") |> range(start: ${startTime}, stop: ${endTime}) |> filter(fn: (r) => r._measurement == \"measurements\" and r._field == \"distance\") |> keep(columns: [\"_time\", \"_value\"])`
         })
     });
-    console.log(response);
+    
     const data = await response.text();
-    console.log("response", data);
     return data;
 }
 
 // Function to format data for Chart.js
 function formatData(influxData) {
-    const NUM_POINTS = 24 * 60 * 60;
-    const now = Math.round(Date.now() / 1000) * 1000;
-    const start = now - NUM_POINTS * 1000;
-
     const lines = influxData.split('\r\n').slice(1); // Split lines and remove the header
-    console.log("lines", lines);
-    const tm = Date.parse(lines[0].slice(11).split(',')[0]);
-    console.log(now, start, tm, now - tm, start - tm, NUM_POINTS);
 
-    const pointData = [];
-    pointData.push({ x: start, y: 55 });
-
-    lines.forEach((line) => {
+    const pointData = lines.map(line => {
         const [db_timestamp, db_distance] = line.slice(11).split(',');
-        pointData.push({ x: Date.parse(db_timestamp), y: parseFloat(db_distance) });
+        return { x: Date.parse(db_timestamp), y: parseFloat(db_distance) };
     });
 
     return pointData;
 }
 
-// Function to create and render the graph
-async function renderGraph() {
-    const influxData = await fetchData();
+// Function to create the initial graph
+async function createGraph() {
+    const startTime = new Date(document.getElementById('startTime').value).toISOString();
+    const endTime = new Date(document.getElementById('endTime').value).toISOString();
+    const influxData = await fetchData(startTime, endTime);
     const pointData = formatData(influxData);
-
-    console.log("pointData", pointData);
-
-    const decimation = {
-        enabled: false,
-        // algorithm: 'min-max',
-    };
 
     const data = {
         datasets: [{
             borderColor: 'rgba(75, 192, 192, 1)',
             borderWidth: 1,
             data: pointData,
-            label: 'Large Dataset',
+            label: 'Distance',
             radius: 0,
         }]
     };
@@ -134,24 +121,23 @@ async function renderGraph() {
         type: 'line',
         data: data,
         options: {
-            // Turn off animations and data parsing for performance
             animation: false,
             parsing: false,
-
             interaction: {
                 mode: 'nearest',
                 axis: 'x',
                 intersect: false
             },
             plugins: {
-                decimation: decimation,
+                decimation: {
+                    enabled: false,
+                },
             },
             scales: {
                 x: {
                     type: 'time',
                     ticks: {
                         source: 'auto',
-                        // Disabled rotation for performance
                         maxRotation: 0,
                         autoSkip: true,
                     }
@@ -161,11 +147,75 @@ async function renderGraph() {
     };
 
     const ctx = document.getElementById('myChart').getContext('2d');
-    const myChart = new Chart(ctx, config);
+    myChart = new Chart(ctx, config);    
 }
 
-// Call the renderGraph function
-// renderGraph();
+// Function to update the graph's data
+async function updateGraph() {
+    const startTime = new Date(document.getElementById('startTime').value).toISOString();
+    const endTime = new Date(document.getElementById('endTime').value).toISOString();
+    const influxData = await fetchData(startTime, endTime);
+    const pointData = formatData(influxData);
+
+    myChart.data.datasets[0].data = pointData; // Update the data
+    myChart.update(); // Update the chart
+}
+
+// Function to initialize time range to last 5 hours
+function initializeTimeRange() {
+    const now = new Date();
+    now.setMinutes(0, 0, 0);
+    const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    
+    document.getElementById('endTime').value = now.toLocaleString('sv').replace(' ', 'T');
+    document.getElementById('startTime').value = fiveHoursAgo.toLocaleString('sv').replace(' ', 'T');
+
+    createGraph();
+}
+
+// Function to adjust the start or end time by 1 hour
+function adjustTime(type, hours) {
+    const time = new Date(document.getElementById(type + 'Time').value);
+    time.setHours(time.getHours() + hours);
+    document.getElementById(type + 'Time').value = time.toLocaleString('sv').replace(' ', 'T');
+    
+    updateGraph();
+}
+
+// Function to show the settings popup
+function showSettings() {
+    document.getElementById('settings-popup').style.display = 'block';
+}
+
+// Function to close the settings popup
+function closeSettings() {
+    document.getElementById('settings-popup').style.display = 'none';
+}
+
+// Function to show the graph popup
+function showGraph() {
+    document.getElementById('graph-popup').style.display = 'block';
+}
+
+// Function to close the graph popup
+function closeGraph() {
+    document.getElementById('graph-popup').style.display = 'none';
+}
+
+// Change the icons on hover
+document.getElementById('settings-icon').onmouseover = function() {
+    this.src = 'settings-hover.png';
+}
+document.getElementById('settings-icon').onmouseout = function() {
+    this.src = 'settings.png';
+}
+
+document.getElementById('graph-icon').onmouseover = function() {
+    this.src = 'chart-hover.png';
+}
+document.getElementById('graph-icon').onmouseout = function() {
+    this.src = 'chart.png';
+}
 
 function servo(pos) {
     clearTimeout(timeout);
@@ -198,43 +248,12 @@ function sendPostRequest() {
         // Add body data if required
         // body: 
     })
-        .then(response => {
-            // Handle the response as needed
-            console.log('POST request sent successfully');
-        })
-        .catch(error => {
-            // Handle errors
-            console.error('Error sending POST request:', error);
-        });
-}
-
-function showSettings() {
-    document.getElementById('settings-popup').style.display = 'block';
-}
-
-function closeSettings() {
-    document.getElementById('settings-popup').style.display = 'none';
-}
-
-function showGraph() {
-    document.getElementById('graph-popup').style.display = 'block';
-    renderGraph();
-}
-
-function closeGraph() {
-    document.getElementById('graph-popup').style.display = 'none';
-}
-
-document.getElementById('settings-icon').onmouseover = function() {
-    this.src = 'settings-hover.png';
-}
-document.getElementById('settings-icon').onmouseout = function() {
-    this.src = 'settings.png';
-}
-
-document.getElementById('graph-icon').onmouseover = function() {
-    this.src = 'chart-hover.png';
-}
-document.getElementById('graph-icon').onmouseout = function() {
-    this.src = 'chart.png';
+    .then(response => {
+        // Handle the response as needed
+        console.log('POST request sent successfully');
+    })
+    .catch(error => {
+        // Handle errors
+        console.error('Error sending POST request:', error);
+    });
 }

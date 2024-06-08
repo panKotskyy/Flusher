@@ -74,6 +74,18 @@
     <div id="graph-popup" class="popup">
         <div class="popup-content">
             <span class="close" onclick="closeGraph()">&times;</span>
+            <div class="time-range-controls">
+                <label>
+                    Start Time: <input type="datetime-local" id="startTime" onchange="updateGraph()"/>
+                    <button onclick="adjustTime('start', -1)">-1h</button>
+                    <button onclick="adjustTime('start', 1)">+1h</button>
+                </label>
+                <label>
+                    End Time: <input type="datetime-local" id="endTime" onchange="updateGraph()"/>
+                    <button onclick="adjustTime('end', -1)">-1h</button>
+                    <button onclick="adjustTime('end', 1)">+1h</button>
+                </label>
+            </div>
             <canvas id="myChart" width="400" height="200"></canvas>
         </div>
     </div>
