@@ -57,6 +57,8 @@ RTC_DATA_ATTR int interruptBootCount = 0;
 RTC_DATA_ATTR float defaultDistance;
 RTC_DATA_ATTR bool movementDetected;
 RTC_DATA_ATTR unsigned long previousMovement;
+RTC_DATA_ATTR int botLastSentMessageId;
+RTC_DATA_ATTR float botLastSentMessage;
 
 unsigned long currentTime;
 unsigned long previousSensorReading = 0;
@@ -224,6 +226,12 @@ void initFileSystem() {
 
 void intitTelegram() {
   client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+  const String commands = F("["
+                            // "{\"command\":\"help\",  \"description\":\"Get bot usage help\"},"
+                            "{\"command\":\"start\", \"description\":\"Message sent when you open a chat with a bot\"}"
+                            // "{\"command\":\"status\",\"description\":\"Answer device current status\"}"
+                            "]");
+  bot.setMyCommands(commands);
 }
 
 float readDistance() {
@@ -362,6 +370,42 @@ bool isTimeInRange(unsigned long epochTime) {
   }
 }
 
+String getParamStatus(bool parameter) {
+  return parameter ? "🟢" : "🔴";
+}
+
+String getStatusMenu() {
+  String keyboardJson = "[[{ \"text\" : \"ℹ️ Refresh\", \"callback_data\" : \"/status\" }],";
+      keyboardJson += "[{ \"text\" : \"⬅️ Back\", \"callback_data\" : \"/menu\" }]]";
+
+      return keyboardJson;
+}
+
+String getMainMenu() {
+  String keyboardJson = "[[{ \"text\" : \"💦 Flush!\", \"callback_data\" : \"/flush\" },{ \"text\" : \"❌ Cancel\", \"callback_data\" : \"/cancel\" }],";
+      keyboardJson += "[{ \"text\" : \"ℹ️\", \"callback_data\" : \"/status\" },{ \"text\" : \"⚙️\", \"callback_data\" : \"/settings\" },{ \"text\" : \"🌐\", \"url\" : \"" + WiFi.localIP().toString() + "\" }]]";
+
+      return keyboardJson;
+}
+
+String getSettingsMenu() {
+  String keyboardJson = "[[{ \"text\" : \"Deep Sleep: " + getParamStatus(config.deepSleepMode) + "\", \"callback_data\" : \"/deepSleep\" }],";
+  keyboardJson += "[{ \"text\" : \"Send Data: " + getParamStatus(config.sendData) + "\", \"callback_data\" : \"/sendData\" }],";
+  keyboardJson += "[{ \"text\" : \"Debug: " + getParamStatus(config.debug) + "\", \"callback_data\" : \"/debug\" }],";
+  keyboardJson += "[{ \"text\" : \"Manual Flush: " + getParamStatus(config.enableManual) + "\", \"callback_data\" : \"/manual\" }],";
+  keyboardJson += "[{ \"text\" : \"Auto Flush: " + getParamStatus(config.enableAuto) + "\", \"callback_data\" : \"/auto\" }],";
+  keyboardJson += "[{ \"text\" : \"Deep Sleep Interval: " + String(config.deepSleepInterval) + "\", \"callback_data\" : \"/deepSleepInterval\" }],";
+  keyboardJson += "[{ \"text\" : \"Sensor Reading Interval: " + String(config.sensorReadingInterval) + "\", \"callback_data\" : \"/sensorReadingInterval\" }],";
+  keyboardJson += "[{ \"text\" : \"Force Sending Interval: " + String(config.forceSensorSendingInterval) + "\", \"callback_data\" : \"/forceSendingInterval\" }],";
+  keyboardJson += "[{ \"text\" : \"Auto Flush Delay: " + String(config.autoFlushDelay) + "\", \"callback_data\" : \"/autoFlushDelay\" }],";
+  keyboardJson += "[{ \"text\" : \"Auto Flush Start Time: " + minutesToHHMM(config.autoFlushStartTime) + "\", \"callback_data\" : \"/autoFlushStartTime\" }],";
+  keyboardJson += "[{ \"text\" : \"Auto Flush Stop Time: " + minutesToHHMM(config.autoFlushStopTime) + "\", \"callback_data\" : \"/autoFlushStopTime\" }],";
+  keyboardJson += "[{ \"text\" : \"Restart\", \"callback_data\" : \"/restart_menu\" }],";
+  keyboardJson += "[{ \"text\" : \"⬅️ Back\", \"callback_data\" : \"/menu\" }]]";
+
+  return keyboardJson;
+}
+
 void handleNewMessages(int numNewMessages) {
   Serial.println("handleNewMessages");
   Serial.println(String(numNewMessages));
@@ -380,17 +424,12 @@ void handleNewMessages(int numNewMessages) {
     Serial.printf("Received message: %s\nFrom: %s\n", text, from_name);
 
     // Handle commands...
-    if (text == "/help") {
-      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/version\", \"/stat\", \"/flush\", \"/cancel\"], [\"/debug\", \"/deepSleep\", \"/sendData\", \"/restart\"]]", true);
-      // bot.sendMessageWithInlineKeyboard(CHAT_ID, "Choose command:", "", "[[\"/debug\", \"/stat\", \"/flush\", \"/sendData\", \"/deepSleep\", \"/restart\", \"/version\"]]");
-    }
-    if (text == "/version") {
-      bot.sendMessage(CHAT_ID, "0.1v Beta");
-    }
-    if (text == "/restart") {
-      bot.sendMessage(CHAT_ID, "Restaring...");
-      bot.getUpdates(bot.last_message_received + 1);
-      esp_restart();
+    if (text == "/start" || text == "/start@PetFeederNotifBot") {
+      if (botLastSentMessageId) {
+        bot.sendMessage(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Expired", "", botLastSentMessageId);
+      }
+      bot.sendMessageWithInlineKeyboard(chat_id, "Pet Flusher: Select the command", "", getMainMenu());
+      botLastSentMessageId = bot.last_sent_message_id;
     }
     if (text == "/flush") {
       newRequest = true;
@@ -400,47 +439,64 @@ void handleNewMessages(int numNewMessages) {
       movementDetected = false;
       bot.sendMessage(chat_id, "Flushing canceled");
     }
-    if (text == "/debug") {
-      config.debug = !config.debug;
-      bot.sendMessage(CHAT_ID, config.debug ? "Debug is ON" : "Debug is OFF");
+    if (text == "/restart") {
+      bot.sendMessage(CHAT_ID, "Restaring...");
+      bot.getUpdates(bot.last_message_received + 1);
+      esp_restart();
     }
-    if (text == "/manual") {
-      config.enableManual = !config.enableManual;
-      bot.sendMessage(CHAT_ID, config.enableManual ? "Manual Flush is ON" : "Manual Flush is OFF");
+
+    if (text == "/menu") {
+        bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getMainMenu(), botLastSentMessageId);
     }
-    if (text == "/auto") {
-      config.enableAuto = !config.enableAuto;
-      bot.sendMessage(CHAT_ID, config.enableAuto ? "Auto Flush is ON" : "Auto Flush is OFF");
-    }
-    if (text == "/sendData") {
-      config.sendData = !config.sendData;
-      bot.sendMessage(CHAT_ID, config.sendData ? "Send Data is ON" : "Send Data is OFF");
+    if (text == "/settings") {
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getSettingsMenu(), botLastSentMessageId);
     }
     if (text == "/deepSleep") {
       config.deepSleepMode = !config.deepSleepMode;
-      bot.sendMessage(CHAT_ID, config.deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
+      // bot.sendMessage(CHAT_ID, config.deepSleepMode ? "Deep Sleep is ON" : "Deep Sleep is OFF");
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getSettingsMenu(), botLastSentMessageId);
     }
-    if (text == "/stat") {
-      String response = "IP: " + WiFi.localIP().toString()
-      + "\nBoot Count (by interrupt): " + String(bootCount) + " (" + String(interruptBootCount) + ")\n"
-      + "\nDebug: " + (config.debug ? "ON" : "OFF")
-      + "\nDeep Sleep: " + (config.deepSleepMode ? "ON" : "OFF")
-      + "\nSend Data: " + (config.sendData ? "ON" : "OFF")
-      + "\nManual Flush: " + (config.enableManual ? "ON" : "OFF")
-      + "\nAuto Flush: " + (config.enableAuto ? "ON" : "OFF")
-      + "\nAuto Flush Starts: " + minutesToHHMM(config.autoFlushStartTime)
-      + "\nAuto Flush Ends: " + minutesToHHMM(config.autoFlushStopTime)
-      + "\nNow: " + getTimeFormatted(currentTime) + " (" + String(currentTime) + ")"
-      + "\ninRange: " + (isTimeInRange(currentTime) ? "YES" : "NO")
+    if (text == "/sendData") {
+      config.sendData = !config.sendData;
+      // bot.sendMessage(CHAT_ID, config.sendData ? "Send Data is ON" : "Send Data is OFF");
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getSettingsMenu(), botLastSentMessageId);
+    }
+    if (text == "/debug") {
+      config.debug = !config.debug;
+      // bot.sendMessage(CHAT_ID, config.debug ? "Debug is ON" : "Debug is OFF");
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getSettingsMenu(), botLastSentMessageId);
+    }
+    if (text == "/manual") {
+      config.enableManual = !config.enableManual;
+      // bot.sendMessage(CHAT_ID, config.enableManual ? "Manual Flush is ON" : "Manual Flush is OFF");
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getSettingsMenu(), botLastSentMessageId);
+    }
+    if (text == "/auto") {
+      config.enableAuto = !config.enableAuto;
+      // bot.sendMessage(CHAT_ID, config.enableAuto ? "Auto Flush is ON" : "Auto Flush is OFF");
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Select the command", "", getSettingsMenu(), botLastSentMessageId);
+    }
+    if (text == "/restart_menu") {
+      bot.sendMessage(CHAT_ID, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Restart", "", botLastSentMessageId);
+      bot.sendMessage(CHAT_ID, "Restaring...");
+      bot.getUpdates(bot.last_message_received + 1);
+      esp_restart();
+    }
 
+    if (text == "/status") {
+      String response = "Boot Count (deep sleep): " + String(bootCount) + " (" + String(interruptBootCount) + ")"
+      + "\nDefault Distance: " + String(defaultDistance, 1)
+      + "\nDistance: " + String(distance, 1)
       + "\n\nPIR: " + (digitalRead(PIR_PIN) ? "HIGH" : "LOW")
-      + "\nMovement Detected: " + (movementDetected ? "Yes" : "No")
-      + "\nMovement Time: " + getTimeFormatted(previousMovement)
+      + "\nMovement Detected: " + (movementDetected ? "YES" : "NO")
+      + "\nIn Time Range: " + (isTimeInRange(currentTime) ? "YES" : "NO")
+      + "\nLast Movement Time: " + getTimeFormatted(previousMovement);
 
-      + "\n\nDistance: " + String(distance, 1)
-      + "\nDefault Distance: " + String(defaultDistance, 1);
+      bot.sendMessageWithInlineKeyboard(chat_id, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)\n\n" + response : "Pet Flusher: Status\n\n" + response, "", getStatusMenu(), botLastSentMessageId);
+    }
 
-      bot.sendMessage(chat_id, response, "");
+    if (text == "/help") {
+      bot.sendMessageWithReplyKeyboard(CHAT_ID, "Choose command:", "", "[[\"/start\", \"/restart\", \"/flush\", \"/cancel\"]]", true);
     }
   }
 }
@@ -467,9 +523,14 @@ void handleMovementDetection() {
   if (config.enableManual && distance < 8 && distance > 0) {
     bot.sendMessage(CHAT_ID, "Manual Flush");
     newRequest = true;
-  } else if (defaultDistance - distance > 5 && distance > 0) {
+  } else if (defaultDistance - distance > 8 && distance > 0) {
     if (!movementDetected) {
-      bot.sendMessage(CHAT_ID, "Movement DETECTED (" + String(distance, 1) + " cm)");
+      if (botLastSentMessageId) {
+        bot.sendMessage(CHAT_ID, botLastSentMessage ? "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)" : "Pet Flusher: Expired", "", botLastSentMessageId);
+      }
+      botLastSentMessage = distance;
+      bot.sendMessageWithInlineKeyboard(CHAT_ID, "Movement DETECTED (" + String(botLastSentMessage, 1) + " cm)", "", getMainMenu());
+      botLastSentMessageId = bot.last_sent_message_id;
     }
     previousMovement = currentTime;
     movementDetected = true;
@@ -585,6 +646,22 @@ void initWebServer() {
   // Route to load script.js file
   server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(LittleFS, "/script.js", "text/javascript");
+  });
+
+  server.on("/chart.png", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/chart.png", "image/png");
+  });
+
+  server.on("/chart-hover.png", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/chart-hover.png", "image/png");
+  });
+
+  server.on("/settings.png", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/settings.png", "image/png");
+  });
+
+  server.on("/settings-hover.png", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/settings-hover.png", "image/png");
   });
 
   // Serve the settings as JSON

@@ -58,10 +58,10 @@
                     Auto Flush Delay: <input type="number" id="autoFlushDelay" onchange="updateSetting('autoFlushDelay', this.value)"> ms
                 </label>
                 <label>
-                    Auto Flush Start Time: <input type="time" id="autoFlushStartTime" onchange="updateSetting('autoFlushStartTime', timeToMinutes(this.value))">
+                    Auto Flush Start Time: <input type="time" id="autoFlushStartTime" onchange="updateSetting('autoFlushStartTime', timeToMinutes(this.value))" step="1">
                 </label>
                 <label>
-                    Auto Flush Stop Time: <input type="time" id="autoFlushStopTime" onchange="updateSetting('autoFlushStopTime', timeToMinutes(this.value))">
+                    Auto Flush Stop Time: <input type="time" id="autoFlushStopTime" onchange="updateSetting('autoFlushStopTime', timeToMinutes(this.value))" step="1">
                 </label>
             </div>
 
@@ -75,17 +75,25 @@
         <div class="popup-content">
             <span class="close" onclick="closeGraph()">&times;</span>
             <div class="time-range-controls">
-                <label>
-                    Start Time: <input type="datetime-local" id="startTime" onchange="updateGraph()"/>
-                    <button onclick="adjustTime('start', -1)">-1h</button>
-                    <button onclick="adjustTime('start', 1)">+1h</button>
-                </label>
-                <label>
-                    End Time: <input type="datetime-local" id="endTime" onchange="updateGraph()"/>
-                    <button onclick="adjustTime('end', -1)">-1h</button>
-                    <button onclick="adjustTime('end', 1)">+1h</button>
-                </label>
-            </div>
+                <div class="time-column">
+                    <label class="time-label">
+                        Start Time: <input type="datetime-local" id="startTime" onchange="updateGraph()" step="3600">
+                    </label>
+                    <div class="time-adjust-buttons">
+                        <button onclick="adjustTime('start', -1)">-1h</button>
+                        <button onclick="adjustTime('start', 1)">+1h</button>
+                    </div>
+                </div>
+                <div class="time-column">
+                    <label class="time-label">
+                        End Time: <input type="datetime-local" id="endTime" onchange="updateGraph()" step="3600">
+                    </label>
+                    <div class="time-adjust-buttons">
+                        <button onclick="adjustTime('end', -1)">-1h</button>
+                        <button onclick="adjustTime('end', 1)">+1h</button>
+                    </div>
+                </div>
+            </div>            
             <canvas id="myChart" width="400" height="200"></canvas>
         </div>
     </div>

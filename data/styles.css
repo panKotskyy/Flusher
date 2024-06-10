@@ -168,7 +168,37 @@ body {
 }
 
 .time-range-controls {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+}
+
+.time-column {
+    display: flex;
+    flex-direction: column;
+}
+
+.time-label input[type="datetime-local"] {
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.time-adjust-buttons {
     display: flex;
     gap: 10px;
-    margin-bottom: 20px;
+    margin-top: 5px;
+}
+
+.time-adjust-buttons button {
+    padding: 5px 10px;
+    border: none;
+    border-radius: 5px;
+    background-color: #4CAF50;
+    color: white;
+    cursor: pointer;
+}
+
+.time-adjust-buttons button:hover {
+    background-color: #45a049;
 }
