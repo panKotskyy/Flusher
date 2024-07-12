@@ -375,33 +375,42 @@ String getParamStatus(bool parameter) {
 }
 
 String getStatusMenu() {
-  String keyboardJson = "[[{ \"text\" : \"ℹ️ Refresh\", \"callback_data\" : \"/status\" }],";
-      keyboardJson += "[{ \"text\" : \"⬅️ Back\", \"callback_data\" : \"/menu\" }]]";
-
-      return keyboardJson;
+  return F("[[{ \"text\" : \"ℹ️ Refresh\", \"callback_data\" : \"/status\" }],[{ \"text\" : \"⬅️ Back\", \"callback_data\" : \"/menu\" }]]");
 }
 
 String getMainMenu() {
-  String keyboardJson = "[[{ \"text\" : \"💦 Flush!\", \"callback_data\" : \"/flush\" },{ \"text\" : \"❌ Cancel\", \"callback_data\" : \"/cancel\" }],";
-      keyboardJson += "[{ \"text\" : \"ℹ️\", \"callback_data\" : \"/status\" },{ \"text\" : \"⚙️\", \"callback_data\" : \"/settings\" },{ \"text\" : \"🌐\", \"url\" : \"" + WiFi.localIP().toString() + "\" }]]";
+  String keyboardJson = F("[[{ \"text\" : \"💦 Flush!\", \"callback_data\" : \"/flush\" },{ \"text\" : \"❌ Cancel\", \"callback_data\" : \"/cancel\" }],");
+      keyboardJson += F("[{ \"text\" : \"ℹ️\", \"callback_data\" : \"/status\" },{ \"text\" : \"⚙️\", \"callback_data\" : \"/settings\" },{ \"text\" : \"🌐\", \"url\" : \"");
+      keyboardJson += WiFi.localIP().toString();
+      keyboardJson += "\" }]]";
 
       return keyboardJson;
 }
 
 String getSettingsMenu() {
-  String keyboardJson = "[[{ \"text\" : \"Deep Sleep: " + getParamStatus(config.deepSleepMode) + "\", \"callback_data\" : \"/deepSleep\" }],";
-  keyboardJson += "[{ \"text\" : \"Send Data: " + getParamStatus(config.sendData) + "\", \"callback_data\" : \"/sendData\" }],";
-  keyboardJson += "[{ \"text\" : \"Debug: " + getParamStatus(config.debug) + "\", \"callback_data\" : \"/debug\" }],";
-  keyboardJson += "[{ \"text\" : \"Manual Flush: " + getParamStatus(config.enableManual) + "\", \"callback_data\" : \"/manual\" }],";
-  keyboardJson += "[{ \"text\" : \"Auto Flush: " + getParamStatus(config.enableAuto) + "\", \"callback_data\" : \"/auto\" }],";
-  keyboardJson += "[{ \"text\" : \"Deep Sleep Interval: " + String(config.deepSleepInterval) + "\", \"callback_data\" : \"/deepSleepInterval\" }],";
-  keyboardJson += "[{ \"text\" : \"Sensor Reading Interval: " + String(config.sensorReadingInterval) + "\", \"callback_data\" : \"/sensorReadingInterval\" }],";
-  keyboardJson += "[{ \"text\" : \"Force Sending Interval: " + String(config.forceSensorSendingInterval) + "\", \"callback_data\" : \"/forceSendingInterval\" }],";
-  keyboardJson += "[{ \"text\" : \"Auto Flush Delay: " + String(config.autoFlushDelay) + "\", \"callback_data\" : \"/autoFlushDelay\" }],";
-  keyboardJson += "[{ \"text\" : \"Auto Flush Start Time: " + minutesToHHMM(config.autoFlushStartTime) + "\", \"callback_data\" : \"/autoFlushStartTime\" }],";
-  keyboardJson += "[{ \"text\" : \"Auto Flush Stop Time: " + minutesToHHMM(config.autoFlushStopTime) + "\", \"callback_data\" : \"/autoFlushStopTime\" }],";
-  keyboardJson += "[{ \"text\" : \"Restart\", \"callback_data\" : \"/restart_menu\" }],";
-  keyboardJson += "[{ \"text\" : \"⬅️ Back\", \"callback_data\" : \"/menu\" }]]";
+  String keyboardJson = "[[{ \"text\" : \"Deep Sleep: ";
+  keyboardJson += getParamStatus(config.deepSleepMode);
+  keyboardJson += "\", \"callback_data\" : \"/deepSleep\" }],[{ \"text\" : \"Send Data: ";
+  keyboardJson += getParamStatus(config.sendData);
+  keyboardJson += "\", \"callback_data\" : \"/sendData\" }],[{ \"text\" : \"Debug: ";
+  keyboardJson += getParamStatus(config.debug);
+  keyboardJson += "\", \"callback_data\" : \"/debug\" }],[{ \"text\" : \"Manual Flush: ";
+  keyboardJson += getParamStatus(config.enableManual);
+  keyboardJson += "\", \"callback_data\" : \"/manual\" }],[{ \"text\" : \"Auto Flush: ";
+  keyboardJson += getParamStatus(config.enableAuto);
+  keyboardJson += "\", \"callback_data\" : \"/auto\" }],[{ \"text\" : \"Deep Sleep Interval: ";
+  keyboardJson += String(config.deepSleepInterval);
+  keyboardJson += "\", \"callback_data\" : \"/deepSleepInterval\" }],[{ \"text\" : \"Sensor Reading Interval: ";
+  keyboardJson += String(config.sensorReadingInterval);
+  keyboardJson += "\", \"callback_data\" : \"/sensorReadingInterval\" }],[{ \"text\" : \"Force Sending Interval: ";
+  keyboardJson += String(config.forceSensorSendingInterval);
+  keyboardJson += "\", \"callback_data\" : \"/forceSendingInterval\" }],[{ \"text\" : \"Auto Flush Delay: ";
+  keyboardJson += String(config.autoFlushDelay);
+  keyboardJson += "\", \"callback_data\" : \"/autoFlushDelay\" }],[{ \"text\" : \"Auto Flush Start Time: ";
+  keyboardJson += minutesToHHMM(config.autoFlushStartTime);
+  keyboardJson += "\", \"callback_data\" : \"/autoFlushStartTime\" }],[{ \"text\" : \"Auto Flush Stop Time: ";
+  keyboardJson += minutesToHHMM(config.autoFlushStopTime);
+  keyboardJson += "\", \"callback_data\" : \"/autoFlushStopTime\" }],[{ \"text\" : \"Restart\", \"callback_data\" : \"/restart_menu\" }],[{ \"text\" : \"⬅️ Back\", \"callback_data\" : \"/menu\" }]]";
 
   return keyboardJson;
 }
