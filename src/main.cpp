@@ -550,13 +550,14 @@ void flush() {
   Serial.println("Flushing...");
   if (!myservo.attached()) {
     myservo.attach(SERVO_PIN);
+    delay(50);
   }
-  for (int pos = 0; pos <= 75; pos += 5) {
+  for (int pos = 0; pos <= 35; pos += 5) {
     myservo.write(pos);
     delay(50);
   }
   delay(6000);
-  for (int pos = 75; pos >= 0; pos -= 5) {
+  for (int pos = 35; pos >= 0; pos -= 5) {
     myservo.write(pos);
     delay(50);
   }
@@ -626,18 +627,21 @@ void handleSettingsRequest(AsyncWebServerRequest *request) {
 void setPosition(int newPos) {
   if (!myservo.attached()) {
     myservo.attach(SERVO_PIN);
+    delay(500);
   }
-  if (newPos > pos) {
-    for (; pos <= newPos; pos++) {
-      myservo.write(pos);
-      delay(2);
-    }
-  } else {
-    for (; pos >= newPos; pos--) {
-      myservo.write(pos);
-      delay(2);
-    }
-  }
+  myservo.write(newPos);
+  delay(2000);
+  // if (newPos > pos) {
+  //   for (; pos <= newPos; pos++) {
+  //     myservo.write(pos);
+  //     delay(2);
+  //   }
+  // } else {
+  //   for (; pos >= newPos; pos--) {
+  //     myservo.write(pos);
+  //     delay(2);
+  //   }
+  // }
 }
 
 // Initialize WebServer
@@ -729,7 +733,7 @@ void initWebServer() {
     if (request->url() == "/") {
       String body(reinterpret_cast<char *>(data), len);
       Serial.printf("Received body: %s", body);
-      newRequest = true;
+      flush();
       request->send(LittleFS, "/index.html");
     }
   });
